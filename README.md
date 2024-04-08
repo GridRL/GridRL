@@ -1,3 +1,12 @@
+<p align="center">
+<img src="extras/img/screen1_exploration_world1.png" width="480">
+</p>
+
+__If you need any help, or just want to chat, [join us on Discord](https://discord.gg/FurRQT6dTP).__
+
+[![Discord](https://img.shields.io/discord/1226866006836903979?style=for-the-badge&logo=Discord&label=GridRL)](https://discord.gg/Zrf2nyH)
+
+
 # GridRL
 Customizable engine for minimalist 2D grid-based games, oriented towards Reinforcement Learning.
 The project provides gymnasium-compatible environments with convenient hooks, of exploration games with a complexity similar to NES/GB games.
@@ -12,7 +21,7 @@ An examples using Stable-Baselines3 PPO algorithm is currently provided. Pufferl
 
 Install GridRL as:
 ```sh
-$ pip install git+https://github.com/GridRL/GridRL
+pip install git+https://github.com/GridRL/GridRL
 ```
 
 Import of the relevant environment generation functions:
