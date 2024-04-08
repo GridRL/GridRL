@@ -169,7 +169,7 @@ Special thanks
 ==============
 I want to thank programmers that were really inspiring with their works
 
-* baekalfen - for his awesome PyBoy - [https://github.com/Baekalfen/PyBoy](Game Boy emulator written in Python)
-* PWhiddy - for his inspiring PokemonRedExperiments - [https://github.com/PWhiddy/PokemonRedExperiments/tree/v2-env](Train RL agents to play Pokemon Red)
-* jsuarez5341 - for his fast PufferLib library - [https://github.com/PufferAI/PufferLib](Simplifying reinforcement learning for complex game environments)
+* baekalfen - for his awesome PyBoy - [Game Boy emulator written in Python](https://github.com/Baekalfen/PyBoy)
+* PWhiddy - for his inspiring PokemonRedExperiments - [Train RL agents to play Pokemon Red](https://github.com/PWhiddy/PokemonRedExperiments/tree/v2-env)
+* jsuarez5341 - for his fast PufferLib library - [Simplifying reinforcement learning for complex game environments](https://github.com/PufferAI/PufferLib)
 * capnspacehook, CJBoey, leanke, thatguy11325, xinpw8 - for their progress in developing successful models on GB games

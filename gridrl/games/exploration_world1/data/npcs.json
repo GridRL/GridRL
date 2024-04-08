@@ -1,0 +1,39 @@
+{
+"comment|npc_name":					[["map_id","y","x","direction","sprite_id","state","mobility","movement"],["script_function_name",["script_args"]]],
+"description|direction":			{"0":"down", "1":"up", "2":"left", "3":"right"},
+"description|state":				{"0":"disabled", "1":"active", "2":"active-hidden","3":"active-hidden-interact-from-below"},
+"description|mobility":				{"0":"only-direction", "1":"can-move", "2":"move-no-collisions"},
+"description|movement":				{"0":"static", "1":"random", "2":"vertical", "3":"horizontal", "4":"down", "5":"up", "6":"left", "7":"right"},
+
+"city1_npc_powerup_debush":	        [["0x01",	13,	30,	0,	10,	1,	0,	0],["script_powerup_debush",[]]],
+
+"city1_npc_club1_leader":	        [["0x01",	24,	11,	0,	10,	1,	0,	0],["script_club1_leader",[]]], 
+"city2_npc_club1_leader":	        [["0x02",	31,	26,	0,	10,	1,	0,	0],["script_club2_leader",[]]], 
+"path5_npc_powerup_swim":	        [["0x0F",	10,	33,	1,	10,	1,	0,	0],["script_powerup_swim",[]]],
+"city3_npc_club3_leader":	        [["0x03",	7,  32,	3,	10,	1,	0,	0],["script_club3_leader",[]]], 
+"path6_npc_powerup_cross_whirlpool":[["0x10",	33,	14,	1,	10,	1,	0,	0],["script_powerup_cross_whirlpool",[]]],
+"city4_npc_powerup_cross_waterfall":[["0x04",	6,	32,	0,	10,	1,	0,	0],["script_powerup_cross_waterfall",[]]],
+"city4_npc_club4_leader":	        [["0x04",	32,	11,	3,	10,	1,	0,	0],["script_club4_leader",[]]], 
+"path7_npc_powerup_teleport":	    [["0x11",	10,	64,	3,	10,	1,	0,	0],["script_powerup_teleport",[]]],
+"city5_npc_club5_leader":	        [["0x05",	26,	13, 2,	10,	1,	0,	0],["script_club5_leader",[]]], 
+"city2_npc_engineer":               [["0x02",	3,	29,	3,	10,	1,	0,	0],["script_city2_engineer",[]]],
+"path9_npc_guard_building_site":	[["0x13",	10,	9,	0,	10,	1,	0,	0],["script_path9_guard",[]]],
+
+"city6_npc_club6_leader":	        [["0x06",	4,	4,	0,	10,	1,	0,	0],["script_club6_leader",[]]], 
+"path10_npc_powerup_break_rock":	[["0x14",	8,	8,	0,	10,	1,	0,	0],["script_powerup_break_rock",[]]],
+"path12_npc_powerup_break_frozen_rock":	[["0x16",	8,	8,	0,	10,	1,	0,	0],["script_powerup_break_frozen_rock",[]]],
+"city7_npc_club7_leader":	        [["0x08",	4,	4,	0,	10,	1,	0,	0],["script_club7_leader",[]]], 
+"path13_npc_powerup_mountain_climb":[["0x17",	8,	8,	0,	10,	1,	0,	0],["script_powerup_mountain_climb",[]]],
+"city8_npc_club8_leader":	        [["0x09",	4,	4,	0,	10,	1,	0,	0],["script_club8_leader",[]]], 
+"path15_npc_medals_check":          [["0x19",	6,	6,	0,	10,	1,	0,	0],["script_medals_check",[]]], 
+"path16_npc_powerups_check":        [["0x1A",	6,	6,	0,	10,	1,	0,	0],["script_powerups_check",[]]], 
+"final_area_npc_champion":	        [["0x0A",	4,	4,	0,	10,	1,	0,	0],["script_final_champion",[]]],
+
+
+"town1_npc_dummy1":                 [["0x00",	3,	3,	0,	10,	1,	0,	0],["script_npc_text",[]]]
+
+
+
+
+
+}

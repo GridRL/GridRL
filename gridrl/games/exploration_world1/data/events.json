@@ -1,0 +1,32 @@
+{
+"comment|event_name":		[["map_id","y","x","direction"],["checkpoint_map_id","y","x"],["start_level"],["required_event_names"]],
+"description|name_prefix":	{"NONPC":"Skipped in NPC mode", "SP":"Comment, harder script in NPC mode"},
+"description|direction":	{"0":"down", "1":"up", "2":"left", "3":"right"},
+"description|y,x":			["y,x is relative to the player position, direction places the event in the faced tile"],
+"description|event_name":	["Add NONPC to the event name to skip computing the field in NPC mode"],
+
+"exiting_first_town":	    [["0x00",	16,	9,	0],	["0x00",9,9],	[1],	[]],
+"powerup_debush":	        [["0x01",	14,	30,	1],	["0x01",9,9],	[2],	["exiting_first_town"]],
+"medal1":	                [["0x01",	25,	11,	1],	["0x01",9,9],	[3],	["exiting_first_town"]],
+"medal2":	                [["0x02",	32,	26,	1],	["0x02",9,9],	[4],	["powerup_debush","medal1"]],
+"powerup_swim":	            [["0x0F",	9,	33,	0],	["0x02",9,9],	[5],	["medal1"]],
+"medal3":	                [["0x03",	7,	33,	2],	["0x03",9,9],	[6],	["medal1"]],
+"powerup_cross_whirlpool":  [["0x10",	32,	14,	0],	["0x03",9,9],	[7],	["medal2"]],
+"powerup_cross_waterfall":  [["0x04",	7,	32,	1],	["0x04",9,9],	[8],	["medal2"]],
+"medal4":	                [["0x04",	32,	12,	2],	["0x04",9,9],	[9],	["powerup_swim","medal2"]],
+"powerup_teleport":	        [["0x11",	10,	65,	2],	["0x04",9,9],	[11],	["powerup_swim","medal2"]],
+"medal5":	                [["0x05",	26,	12,	3],	["0x05",9,9],	[10],	["powerup_cross_whirlpool","medal4"]],
+"engineer_pass":	        [["0x02",	3,	30,	2],	["0x02",9,9],	[12],	["powerup_cross_waterfall","medal5"]],
+"engineer_guard":	        [["0x13",	11, 9,	1],	["0x05",9,9],	[13],	["powerup_cross_waterfall","medal5","engineer_pass"]],
+
+"medal6":	                [["0x06",	3,	4,	1],	["0x06",9,9],	[14],	["powerup_debush","medal2"]],
+"powerup_break_rock":	    [["0x14",	7,	8,	1],	["0x06",9,9],	[15],	["medal6"]],
+"powerup_break_frozen_rock":[["0x16",	7,	8,	1],	["0x07",9,9],	[16],	["medal6"]],
+"medal7":	                [["0x08",	3,	4,	1],	["0x08",9,9],	[17],	["powerup_break_rock","medal6"]],
+"powerup_mountain_climb":   [["0x17",	7,	8,	1],	["0x08",9,9],	[18],	["medal6"]],
+"medal8":	                [["0x09",	3,	4,	1],	["0x09",9,9],	[19],	["powerup_mountain_climb","medal7"]],
+"all_medals_check":         [["0x19",	3,	4,	1],	["0x09",9,9],	[20],	["medal1","medal2","medal3","medal4","medal5","medal6","medal7","medal8"]],
+"all_powerups_check":       [["0x1A",	3,	4,	1],	["0x09",9,9],	[21],	["powerup_debush","powerup_swim","powerup_teleport","powerup_cross_whirlpool","powerup_cross_waterfall","powerup_break_rock","powerup_mountain_climb","powerup_break_frozen_rock"]],
+"entering_final_area":	    [["0x0A",	10,	3,	1],	["0x00",9,9],	[22],	["all_medals_check_check","all_powerups_check"]],
+"final_champion":	        [["0x0A",	10,	10,	1],	["0x0A",9,9],	[23],	["entering_final_area"]]
+}

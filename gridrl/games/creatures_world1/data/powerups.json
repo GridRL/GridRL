@@ -1,0 +1,6 @@
+{
+"comment|powerup_name":["powerup_event_name","required_event_names"],
+"comment|info":["DON'T EDIT THIS FILE, MOST SCRIPTING RECOGNITION IS HARDCODED"],
+
+"can_debush":	["powerup_debush","medal2"]
+}

@@ -1,0 +1,8 @@
+{
+"comment":					[["map_id","y","x"],"script_function_name"],
+
+"exiting_first_town1":  	[["0x00",	17,	9],"script_exiting_first_town"],
+"exiting_first_town2":  	[["0x00",	17,	10],"script_exiting_first_town"],
+"entering_final_area1":  	[["0x0A",	1,	1],"script_entering_final_area"],
+"entering_final_area2":  	[["0x0A",	2,	1],"script_entering_final_area"]
+}
