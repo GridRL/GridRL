@@ -4,7 +4,7 @@
 
 __If you need any help, or just want to chat, [join us on Discord](https://discord.gg/FurRQT6dTP).__
 
-[![Discord](https://img.shields.io/discord/1226866006836903979?style=for-the-badge&logo=Discord&label=GridRL)](https://discord.gg/Zrf2nyH)
+[![Discord](https://img.shields.io/discord/1226866006836903979?style=for-the-badge&logo=Discord&label=GridRL)](https://discord.gg/FurRQT6dTP)
 
 
 # GridRL
