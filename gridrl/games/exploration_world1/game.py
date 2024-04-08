@@ -90,7 +90,7 @@ class ExplorationWorld1Game(ExplorationAbstractGame):
     def define_game_config(self,config:dict)->None:
         """Game-specific configurations initialization."""
         super().define_game_config(config)
-        self.sandbox=True#bool(config.get("sandbox",False))
+        self.sandbox=bool(config.get("sandbox",False))
         if self.sandbox:
             sandbox_start_pos=[0x1C,6,5,0]
             self.set_start_positions(start=sandbox_start_pos,checkpoint=sandbox_start_pos)
