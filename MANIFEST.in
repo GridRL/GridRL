@@ -1,0 +1,3 @@
+include gridrl/games/**/assets/**/*.png
+include gridrl/games/**/data/*.json
+include gridrl/games/**/data/*.json.gz
