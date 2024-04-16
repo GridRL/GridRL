@@ -12,22 +12,22 @@ if __package__ is None or len(__package__)==0:
     from games_list import GAMES_LIST
     from game_module_selector import GameModuleSelector,get_game_default_env_class
     from configs_speedup_dependencies import print_configs_speedup_settings
-    from functions_benchmarking import benchmark_env_multiconfig,profile_env
+    from functions_benchmarking import get_benchmark_env_base_configs,benchmark_envs,benchmark_env_multiconfig,profile_env
     from core_environment import make_env,validate_environment
 else:
     from gridrl.games_list import GAMES_LIST
     from gridrl.game_module_selector import GameModuleSelector,get_game_default_env_class
     from gridrl.configs_speedup_dependencies import print_configs_speedup_settings
-    from gridrl.functions_benchmarking import benchmark_env_multiconfig,profile_env
+    from gridrl.functions_benchmarking import get_benchmark_env_base_configs,benchmark_envs,benchmark_env_multiconfig,profile_env
     from gridrl.core_environment import make_env,validate_environment
 
 def argparse_cli_game()->argparse.Namespace:
     """Cli parse arguments."""
     parser=argparse.ArgumentParser()
     parser.add_argument("game",type=str,help="Name of the GridRL game.")
-    parser.add_argument("--mode",type=str,help="Name of the mode to run.",choices=["map","info","play","gif","stream","benchmark","profile","examples","copy","test"],default="test")
-#    parser.add_argument("--action_complexity",type=int,help="Complexity of the game and actions performed.",choices=[-1,0,1,2,3,4],default=-1)
-#    parser.add_argument("--screen_observation_type",type=int,help="Type of observation space returned.",choices=[-1,0,1,2,3,4],default=-1)
+    parser.add_argument("--mode",type=str,help="Name of the mode to run.",choices=["map","info","play","sandbox","gif","stream","benchmark","menu_benchmark","profile","examples","copy","test"],default="test")
+    parser.add_argument("--action_complexity",type=int,help="Complexity of the game and actions performed.",choices=[-1,0,1,2,3,4],default=-1)
+    parser.add_argument("--screen_observation_type",type=int,help="Type of observation space returned.",choices=[-1,0,1,2,3,4],default=-1)
     parser.add_argument("--starting_event",type=str,help="Starts from a custom event flag.",default="")
     parser.add_argument("--screen_view_mult",type=int,help="Extends the game screen for debugging purposes.",default=1)
     parser.add_argument("-stdout",action="store_true",help="Avoid redirecting UI stdout to textbox.",default=False)
@@ -45,9 +45,9 @@ def args_namespace_to_dict(namespace:Union[argparse.Namespace,dict])->dict:
 
 def cli_run_game(game_name:str,config:Union[dict,None]=None,gif:bool=False,streaming:bool=False,validate:bool=True,redirect_stdout:bool=True):
     """Run the game in UI mode given configuration and extra settings."""
-    if config is None:
-        config={}
-    env_config=dict(config)
+    env_config={"action_complexity":3,"screen_observation_type":4}
+    if config is not None:
+        env_config.update(dict(config))
     env_class=get_game_default_env_class(game_name)
     if env_class is None:
         print(f"Game [{game_name}] class not found.")
@@ -58,8 +58,7 @@ def cli_run_game(game_name:str,config:Union[dict,None]=None,gif:bool=False,strea
         env_config["stream"]=True
     if validate:
         validate_environment(env_class,{"skip_validation":True},fast=True,verbose=True)
-    env_config.update({"gui":True,"redirect_stdout":redirect_stdout,"skip_validation":True,
-        "action_complexity":3,"screen_observation_type":4,"screen_downscale":1})
+    env_config.update({"gui":True,"redirect_stdout":redirect_stdout,"skip_validation":True})
     print(f"Starting game [{game_name}].")
     env=make_env(env_class,rank=0,env_config=env_config,
         agent_class=None,agent_args={},seed=0)()
@@ -112,10 +111,28 @@ def cli_run_benchmark(game_name,running_verbose:bool=True)->None:
     print_configs_speedup_settings()
     running_verbose=True
     configs_list=[]
-    configs_list+=[{"screen_observation_type":i,"action_complexity":j} for j in range(3) for i in range(4)]
-    configs_list+=[{"screen_observation_type":4,"action_complexity":j,"screen_downscale":2} for j in range(2,3)]
+    configs_list+=[{"screen_observation_type":i,"action_complexity":j} for j in range(4) for i in range(4)]
+    configs_list+=[{"screen_observation_type":4,"action_complexity":j,"screen_downscale":2} for j in range(2,4)]
     env_class=get_game_default_env_class(game_name)
     benchmark_env_multiconfig(env_class,configs_list,steps=50000,seed=7,running_verbose=running_verbose,verbose=True)
+
+def cli_run_menu_benchmark(game_name)->None:
+    """Menu benchmark routine."""
+    env_config=get_benchmark_env_base_configs()
+    env_config.update({"screen_observation_type":4,"action_complexity":3,"screen_downscale":2})
+    env=make_env(get_game_default_env_class(game_name),rank=0,env_config=env_config)()
+    if not env.true_menu or not env.has_menu():
+        action_space_size=0
+        print("No menu set, likely not programmed or set in configurations.")
+    else:
+        action_space_size=8
+        env.menu.set_force_menu()
+        print("Running menu only benchmark, without any render.")
+        benchmark_envs([env.menu],steps=50000,action_space_size=8,seed=7,show_screen=False,verbose=True)
+        print("Running environment benchmark.")
+    benchmark_envs([env],steps=50000,action_space_size=action_space_size,seed=7,show_screen=False,verbose=True)
+    print("Profiling the environment.")
+    profile_env(env,steps=5000)
 
 def cli_run_profiling(game_name,running_verbose:bool=True)->None:
     """Main profiling routine."""
@@ -134,15 +151,19 @@ def run_mode(game_name:str,mode_name:str,config:Union[dict,None]=None,redirect_s
     """Cli mode selection."""
     if config is None:
         config={}
+    if mode_name in ["sa","sandbox"]:
+        config["sandbox"]=True
     if mode_name in ["map","m"]:
         cli_show_map(game_name)
     elif mode_name in ["info"]:
         cli_show_game_info(game_name)
-    elif mode_name in ["p","play","s","stream","g","gif"]:
-        cli_run_game(game_name,config=config,gif=mode_name[0]=="g",streaming=mode_name[0]=="s",
+    elif mode_name in ["p","play","sa","sandbox","s","stream","g","gif"]:
+        cli_run_game(game_name,config=config,gif=mode_name[0]=="g",streaming=(mode_name[:2]+"t")[:2]=="st",
             validate=True,redirect_stdout=redirect_stdout)
     elif mode_name in ["b","bench","benchmark"]:
         cli_run_benchmark(game_name)
+    elif mode_name in ["mb","menu_benchmark"]:
+        cli_run_menu_benchmark(game_name)
     elif mode_name in ["pr","profile"]:
         cli_run_profiling(game_name)
     elif mode_name in ["e","examples"]:

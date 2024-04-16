@@ -14,24 +14,34 @@ if __package__ is None or len(__package__)==0:
     except NameError:
         __file__=""
     sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}{os.sep}..{os.sep}..")
-#    from functions_numba import nb_in_array_uint8
-    from core_game import lru_cache_func
-    from core_constants import grass_tile_id,water_tile_id
-    from functions_data import read_map_metadata_file
 try:
     from gridrl.functions_data import (read_json_file,format_child_filename_path,
         is_json_key_comment,convert_hex_str,read_map_metadata_file)
 #    from gridrl.functions_numba import nb_in_array_uint8
+    from gridrl.core_constants import bush_tile_id
     from gridrl.core_game import lru_cache_func
     from gridrl.core_constants import grass_tile_id,water_tile_id
     from gridrl.abstract_games.exploration_abstract_game import ExplorationAbstractGame
+    from gridrl.games.creatures_world1.menu import CreaturesWorld1Menu
+    from gridrl.games.creatures_world1.constants import (moves_list,field_moves_list,
+        creatures_names,creatures_bst,creatures_evolution_data,
+        learn_move_items_dict,learn_move_items_list,key_items_list,
+        items_list,items_ids_dict,
+    )
 except ModuleNotFoundError:
     from functions_data import (read_json_file,format_child_filename_path,
         is_json_key_comment,convert_hex_str,read_map_metadata_file)
 #    from functions_numba import nb_in_array_uint8
+    from core_constants import bush_tile_id
     from core_game import lru_cache_func
     from core_constants import grass_tile_id,water_tile_id
     from abstract_games.exploration_abstract_game import ExplorationAbstractGame
+    from games.creatures_world1.menu import CreaturesWorld1Menu
+    from games.creatures_world1.constants import (moves_list,field_moves_list,
+        creatures_names,creatures_bst,creatures_evolution_data,
+        learn_move_items_dict,learn_move_items_list,key_items_list,
+        items_list,items_ids_dict,
+    )
 
 __all__=["CreaturesWorld1Game"]
 
@@ -63,9 +73,17 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
         self.start_level=5
         self.invincible=False
         self.trek_map_ids=np.array([0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,0xE0,0xE1],dtype=np.uint8)
-        self.party_bsts=[318,405,525]
-        self.party_evolution_levels=[16,32,-1]
+        self.game_data_creatures_bst=np.array(creatures_bst,dtype=np.uint16,order="C")
+        self.game_data_creatures_evolution_data=np.asarray(creatures_evolution_data,dtype=np.uint16,order="C")
+#        self.items_list=np.asarray(items_list,dtype=np.uint8,order="C")
+        tset=set(field_moves_list)
+        self.field_moves_ids=np.array([i for i,k in enumerate(moves_list) if k in tset],dtype=np.uint8,order="C")
+        tset=set(learn_move_items_list)
+        self.learn_move_items_ids=np.array([i for i,k in enumerate(items_list) if k in tset],dtype=np.uint8,order="C")
+        tset=set(key_items_list)
+        self.key_items_ids=np.array([i for i,k in enumerate(items_list) if k in tset],dtype=np.uint8,order="C")
         self.puzzle_random_idxs=[12,11]
+        self.field_moves_action_ids={}
 ##################
 ### SUPER INIT ###
 ##################
@@ -74,6 +92,9 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
 #################################
 ### GAME SPECIFIC DEFINITIONS ###
 #################################
+    def get_menu_class(self)->Any:
+        """Return the class of the menu object."""
+        return CreaturesWorld1Menu
     def game_enforce_config(self,config:dict)->dict:
         """Alter the configurations dict to enforce specific options."""
         return super().game_enforce_config(config)
@@ -93,22 +114,50 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
         """Game-specific configurations initialization."""
         self.start_level=max(5,min(95,int(config.get("start_level",5))))
         self.invincible=bool(config.get("invincible",False))
+        if self.sandbox:
+            sandbox_start_pos=[0x05,19,15,1]
+            self.start_level=40
+            self.set_start_positions(start=sandbox_start_pos,checkpoint=sandbox_start_pos)
+            self.starting_event=""
+            self.starting_collected_flags=["exiting_first_town","start_decision","encounters_tracker"]
+            self.starting_collected_flags+=[f"medal{i:d}" for i in range(1,6)]
+            self.starting_collected_flags+=[f"powerup_{k[4:]}" for k,_ in self.get_game_powerup_tiles_dict().items()]
+    def define_game_config_post_game_state_creation(self,config:dict)->None:
+        """Game-specific configurations initialization run after game state declaration."""
+        if self.sandbox:
+            self.set_first_party_creature()
+            self.set_new_party_creature(4,15)
+            self.set_item_by_str("powerup_debush")
+            self.set_item_by_str("powerup_swim")
+            self.add_item_by_id(1,1)
+            self.add_item_by_id(2,2)
+            self.add_item_by_id(3,4)
+            self.add_item_by_id(1,10)
+            self.drop_item_by_id(3,1)
+            self.add_item_by_id(4,4)
+            self.drop_item_by_id(2,0xFF)
     def define_internal_data(self)->None:
         """Game-specific attribute declarations."""
         self.trek_map_ids=np.array([0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,0xE0,0xE1],dtype=np.uint8)
-        self.party_bsts=[318,405,525]
-        self.party_evolution_levels=[16,32,-1]
+        self.game_data_creatures_bst=np.array(creatures_bst,dtype=np.uint16,order="C")
+        self.game_data_creatures_evolution_data=np.asarray(creatures_evolution_data,dtype=np.uint16,order="C")
         self.puzzle_random_idxs=[12,11]
         super().define_internal_data()
     def define_actions_ids(self)->int:
         """Custom game actions id declaration."""
-        return super().define_actions_ids()
+        ret=super().define_actions_ids()
+        self.field_moves_action_ids={
+            "debush":self.action_debush_id,
+            "swim":self.action_swim_id,
+        }
+        return ret
     def define_extra_game_state(self)->dict:
         """Dict of extra values preserved in the game_state dictionary."""
         state=super().define_extra_game_state()
-        state.update({"money":0,"party_size":0,"bag_size":0,
+        state.update({"money":3000,"party_size":0,"bag_size":0,
             "encounter_steps":0,"trek_timeout":0,
             "bag":np.zeros((20,2),np.uint8,order="C"),
+            "tracker_flags":np.zeros((len(creatures_names),),np.uint8,order="C"),
             "party_index":np.zeros((6,),np.int16,order="C"),
             "party_moves":np.zeros((6,4),np.int16,order="C"),
             "party_levels":np.zeros((6,),np.uint8,order="C"),
@@ -122,6 +171,14 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     def define_extra_stacked_state(self)->dict:
         """Dict of extra stacked values preserved in the stacked_state dictionary."""
         return {}
+#############
+### TILES ###
+#############
+    def get_game_powerup_tiles_dict(self)->dict:
+        """Return a dict with powerup keys and walkable tiles list as values."""
+        return {"can_debush":[bush_tile_id],
+            "can_swim":[water_tile_id],
+        }
 #####################
 ### MAP FUNCTIONS ###
 #####################
@@ -188,9 +245,182 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     def game_on_reset(self)->None:
         """Game-specific reset to initial state."""
         self.game_state["encounter_steps"]=0
-        self.game_state["money"]=0
+        self.game_state["money"]=3000
         self.reset_party()
         self.reset_bag()
+###########################
+### STRUCTURE FUNCTIONS ###
+###########################
+    def switch_party_creatures(self,pos1:int,pos2:int)->None:
+        """Switch order of creatures in the party."""
+        for k in ["party_index","party_moves","party_levels","party_exps","party_bsts","party_avg_stats","party_hp_ratios","party_pp_ratios"]:
+            t=self.game_state[k][pos1].copy()
+            self.game_state[k][pos1]=self.game_state[k][pos2]
+            self.game_state[k][pos2]=t
+    def learnable_move_item_to_move_id(self,idx:int)->int:
+        """Return the id of the move contained in the item."""
+        return learn_move_items_dict.get(items_list[idx],0)
+    def learnable_move_item_to_move_name(self,idx:int)->str:
+        """Return the name of the move contained in the item."""
+        return moves_list[self.learnable_move_item_to_move_id(idx)]
+    def learn_move_to_creature(self,party_pos:int,move_id:int,move_pos:int)->bool:
+        """Override move slot on the creature"""
+        self.game_state["party_moves"][party_pos,move_pos]=move_id
+        return True
+    def get_item_id_from_str(self,name:str)->int:
+        """String to item id dict lookup."""
+        return items_ids_dict.get(name,0)
+    def get_item_id_by_pos(self,pos:int)->int:
+        """Return the id of the item given its bag position."""
+        return self.game_state["bag"][pos,0]
+    def get_item_bag_quantity_by_pos(self,pos:int)->int:
+        """Return the quantity of the item given its bag position."""
+        return self.game_state["bag"][pos,1]
+    def get_item_pos_in_bag(self,idx:int)->int:
+        """Return the bag index of the item in bag or -1 when not found."""
+        for i in range(self.game_state["bag_size"]):
+            if self.game_state["bag"][i,0]==idx:
+                return i
+        return -1
+    def set_item_by_pos(self,idx:int,pos:int,amount:int=1)->bool:
+        """Set item id and amount given a bag position."""
+        if amount<1:
+            return self.drop_item_by_pos(pos,0xFF)
+        if pos<0:
+            pos=self.game_state["bag_size"]
+            if self.game_state["bag_size"]>=self.game_state["bag"].shape[0]:
+                return False
+            self.game_state["bag"][pos,0]=idx
+            self.game_state["bag"][pos,1]=amount
+            self.game_state["bag_size"]+=1
+        else:
+            self.game_state["bag"][pos,1]=amount
+        return True
+    def set_item_by_id(self,idx:int,amount:int=1)->bool:
+        """Set item id and amount."""
+        return self.set_item_by_pos(idx,self.get_item_pos_in_bag(idx),amount)
+    def set_item_by_str(self,name:str,amount:int=1)->bool:
+        """Set item from string."""
+        idx=self.get_item_id_from_str(name)
+        return self.set_item_by_pos(idx,self.get_item_pos_in_bag(idx),amount) if idx>0 else False
+    def add_item_by_pos(self,idx:int,pos:int,amount:int=1)->bool:
+        """Increase item in bag by position."""
+        if pos<0:
+            pos=self.game_state["bag_size"]
+            if self.game_state["bag_size"]>=self.game_state["bag"].shape[0]:
+                return False
+            prev_val=self.game_state["bag"][pos,1]
+            self.game_state["bag"][pos,0]=idx
+            self.game_state["bag"][pos,1]+=amount
+            if prev_val>self.game_state["bag"][pos,1]:
+                self.game_state["bag"][pos,1]=0xFF
+            self.game_state["bag_size"]+=1
+        else:
+            self.game_state["bag"][pos,1]+=amount
+        return True
+    def add_item_by_id(self,idx:int,amount:int=1)->bool:
+        """Increase item in bag by id."""
+        return self.add_item_by_pos(idx,self.get_item_pos_in_bag(idx),amount)
+    def add_item_by_str(self,name:str,amount:int=1)->bool:
+        """Increase item from string."""
+        idx=self.get_item_id_from_str(name)
+        return self.add_item_by_pos(idx,self.get_item_pos_in_bag(idx),amount) if idx>0 else False
+    def drop_item_by_pos(self,pos:int,amount:int=0xFF)->bool:
+        """Decrease item in bag by position."""
+        if pos<0:
+            return False
+        prev_val=self.game_state["bag"][pos,1]
+        self.game_state["bag"][pos,1]-=amount
+        if prev_val<self.game_state["bag"][pos,1]:
+            self.game_state["bag"][pos,1]=0
+        if self.game_state["bag"][pos,1]<1:
+            self.game_state["bag"][pos,0]=0
+            self.game_state["bag"][pos:self.game_state["bag_size"]]=np.roll(self.game_state["bag"][pos:self.game_state["bag_size"]],-1,axis=0)
+            self.game_state["bag_size"]-=1
+        return True
+    def drop_item_by_id(self,idx:int,amount:int=0xFF)->bool:
+        """Decrease item in bag by id."""
+        return self.drop_item_by_pos(self.get_item_pos_in_bag(idx),amount)
+    def drop_item_by_str(self,name:str,amount:int=0xFF)->bool:
+        """Increase item in bag by position."""
+        idx=self.get_item_id_from_str(name)
+        return self.drop_item_by_pos(self.get_item_pos_in_bag(idx),amount) if idx>0 else False
+    def use_item(self,item_pos:int)->None:
+        """Decrease item from string."""
+        return
+    def use_item_on_creature(self,item_pos:int,party_pos:int)->None:
+        """Apply the item on the creature."""
+        return
+    def use_item_on_move(self,item_pos:int,party_pos:int,move_pos:int)->None:
+        """Apply the item on the move of a creature."""
+        return
+    def use_field_move(self,move_id)->bool:
+        """Binds usage of the field move withing the environment."""
+        if move_id in self.field_moves_ids:
+            action_id=self.field_moves_action_ids.get(moves_list[move_id],0)
+            if action_id>0:
+                self.add_forced_action(action_id)
+                return True
+        return False
+###############################
+### STRUCTURES CONDITIONALS ###
+###############################
+    def get_creature_field_moves(self,pos)->list:
+        """Gets ids of field moves on a given creature."""
+        return [k for k in self.env.game_state["party_moves"][pos] if k in self.field_moves_ids] if pos<self.env.game_state["party_size"] else []
+    def can_use_field_move(self,move_id)->None:
+        """Is allowed to use the field move."""
+        if move_id in self.field_moves_ids:
+            return self.get_event_flag(f"can_{moves_list[move_id]}")>0
+        return False
+    def can_toss_item_by_pos(self,pos:int)->bool:
+        """Return if the item can be tossed safely."""
+        return not self.is_key_item(self.get_item_id_by_pos(pos))
+    def can_use_item(self,item_pos:int)->bool:
+        """Check if the item can be used."""
+        return True
+    def creature_has_free_move_slot(self,party_pos:int)->bool:
+        """Check if the creature has a free move slot."""
+        return False
+    def can_use_item_on_creature(self,item_pos:int,party_pos:int)->bool:
+        """Return if the item can be used on the creature."""
+        return True
+    def can_use_move_on_creature(self,item_pos:int,party_pos:int)->bool:
+        """@."""
+        return True
+    def is_duplicate_move_on_creature(self,item_pos:int,party_pos:int)->bool:
+        """@."""
+        return False
+    def item_used_on_creature(self,item_pos:int,party_pos:int)->bool:
+        """@."""
+        return True
+    def is_pp_cure(self,idx:int)->bool:
+        """@."""
+        return False
+    def is_overworld_item(self,idx:int)->bool:
+        """@."""
+        return False
+    def is_key_item(self,idx:int)->bool:
+        """Return if the item is a key item."""
+        for k in self.key_items_ids:
+            if idx==k:
+                return True
+        return False
+    def is_teachable_move(self,idx:int)->bool:
+        """Return if the item is a teachable move."""
+        for k in self.learn_move_items_ids:
+            if idx==k:
+                return True
+        return False
+    def is_repel(self,item_pos:int)->bool:
+        """@."""
+        return False
+    def get_creature_moves_count(self,party_pos:int)->int:
+        """Return the amount of moves of a creature."""
+        return 4
+    def move_forgettable_by_creature(self,party_pos:int,move_id:int,move_pos:int)->bool:
+        """Check if a powerup move is going to be overridden by a new move."""
+        return self.env.game_state["party_moves"][party_pos,move_pos] not in self.field_moves_ids
 #########################
 ### RANDOM ENCOUNTERS ###
 #########################
@@ -250,38 +480,46 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     def get_encounter_exp(self,level:int,base_exp:int=64,natural:bool=True,traded:bool=False)->int:
         """Formula for encounter exp."""
         return int((1 if natural else 1.5)*(1.5 if traded else 1)*base_exp*level/7.)
-    def set_new_party_creature(self,level:int=0)->None:
+    def set_new_party_creature(self,creature_id:int,level:int=2)->None:
         """Assigns a new creature to the party."""
         if self.game_state["party_size"]>=len(self.game_state["party_hp_ratios"]):
             return
         idx=self.game_state["party_size"]
-        self.set_creature_level(idx,max(5,level))
-        self.game_state["party_bsts"][idx]=self.party_bsts[idx]
+        self.env.game_state["tracker_flags"][creature_id]=2
+        self.set_creature_level(idx,max(1,level))
+        self.game_state["party_index"][idx]=creature_id
+        self.game_state["party_bsts"][idx]=self.game_data_creatures_bst[idx]
         self.game_state["party_avg_stats"][idx]=self.calculate_creature_stats(self.game_state["party_levels"][idx],self.game_state["party_bsts"][idx])
         self.game_state["party_hp_ratios"][idx]=1.
         self.game_state["party_pp_ratios"][idx]=1.
         self.game_state["party_size"]+=1
         self.game_state["player_level"]+=self.game_state["party_levels"][idx]
+        for i in range(4):
+            self.game_state["party_moves"][idx,i]=i+2
         for _ in range(2):
             if not self.check_stats_evolution(idx):
                 break
     def set_first_party_creature(self,level:int=0)->None:
         """Assigns the first creature to the party."""
         if self.game_state["party_size"]<1:
-            self.set_new_party_creature(max(5,self.start_level if level==0 else level))
+            self.set_new_party_creature(1,max(5,self.start_level if level==0 else level))
+    def swap_party_creatures(self,pos1:int,pos2:int)->None:
+        """Swap party position."""
+        return
     @lru_cache_func(maxsize=512)
     def calculate_creature_stats(self,level:int,bst:int,dv_mult:float=0.,medals:int=0)->int:
         """Formula for internal creature stat."""
         return int((1+float(medals)/64.)*(5+float(bst)/5.*float(level)/50.+dv_mult*93*float(level)/100.))
     def check_stats_evolution(self,idx:int)->bool:
         """Check if the creature can transform into a new form."""
-        for base_bst,evo_bst,evo_level in zip(self.party_bsts[:-1],self.party_bsts[1:],self.party_evolution_levels[:-1]):
-            if self.game_state["party_levels"][idx]>=evo_level>0 and self.game_state["party_bsts"][idx]==base_bst:
-                prev_stat=self.game_state["party_avg_stats"][idx]
-                self.game_state["party_bsts"][idx]=evo_bst
-                self.game_state["party_avg_stats"][idx]=self.calculate_creature_stats(self.game_state["party_levels"][idx],self.game_state["party_bsts"][idx])
-                self.game_state["party_hp_ratios"][idx]=max(1e-4,min(1.,(self.game_state["party_hp_ratios"][idx]*prev_stat+self.game_state["party_avg_stats"][idx]-prev_stat)/self.game_state["party_avg_stats"][idx]))
-                return True
+        evo_data=self.game_data_creatures_evolution_data[self.game_state["party_index"][idx]]
+        if self.game_state["party_levels"][idx]>=evo_data[0]>0 and evo_data[1]==1:
+            prev_stat=self.game_state["party_avg_stats"][idx]
+            self.game_state["party_index"][idx]=evo_data[2]
+            self.game_state["party_bsts"][idx]=self.game_data_creatures_bst[evo_data[2]]
+            self.game_state["party_avg_stats"][idx]=self.calculate_creature_stats(self.game_state["party_levels"][idx],self.game_state["party_bsts"][idx])
+            self.game_state["party_hp_ratios"][idx]=max(1e-4,min(1.,(self.game_state["party_hp_ratios"][idx]*prev_stat+self.game_state["party_avg_stats"][idx]-prev_stat)/self.game_state["party_avg_stats"][idx]))
+            return True
         return False
     def set_creature_level(self,idx:int,level,set_exp:bool=True,set_hp:bool=True)->None:
         """Set the creature level and update stats."""
@@ -371,7 +609,7 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
             self.party_heal()
         elif lost:
             self.game_state["battle_type"]=0
-            self.game_state["text_type"]=0
+            self.close_menu()
             self.party_heal(0.2 if self.invincible else 1.)
             if not self.invincible:
                 self.game_state["loss_count"]+=1

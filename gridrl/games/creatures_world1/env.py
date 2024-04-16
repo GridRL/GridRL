@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Constants for the game creatures_world1."""
+"""Environment for the game creatures_world1."""
 
 import sys
 import os

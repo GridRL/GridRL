@@ -36,12 +36,12 @@ def script_core_load_custom_save_from_starting_event(env,name:str="",*args,**kwa
     return False
 
 def script_npc_text(env,*args,**kwargs)->bool:
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     return False
 
 def script_invert_direction_text(env,*args,**kwargs)->bool:
     env.add_forced_movement_invert_direction()
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     return False
 
 def script_heal(env,*args,**kwargs)->bool:
@@ -87,8 +87,8 @@ def script_powerup_cross_whirlpool(env,*args,**kwargs)->bool:
     return False
 
 def script_powerup_cross_waterfall(env,*args,**kwargs)->bool:
-    if env.get_event_flag("powerup_waterfall")==0:
-        env.activate_event_reward_flag("powerup_waterfall")
+    if env.get_event_flag("powerup_cross_waterfall")==0:
+        env.activate_event_reward_flag("powerup_cross_waterfall")
     return False
 
 def script_club4_leader(env,*args,**kwargs)->bool:
@@ -107,7 +107,7 @@ def script_powerup_teleport(env,*args,**kwargs)->bool:
     return False
 
 def script_city2_engineer(env,*args,**kwargs)->bool:
-    if env.get_event_flag("medal5")==0:
+    if env.get_event_flag("medal5")>0:
 #        env.modify_npc_configs("path9_npc_guard_building_site",{"x":8})
         if env.get_event_flag("engineer_pass")==0:
             env.activate_event_reward_flag("engineer_pass")

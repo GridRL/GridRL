@@ -4,11 +4,13 @@
 
 from typing import Union
 import sys
+#import os
 from io import BytesIO
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
-from PIL import Image
+from PIL import Image,ImageFont,ImageDraw
 import matplotlib.pyplot as plt
+#import matplotlib.font_manager as mfontm
 sys.dont_write_bytecode=True
 
 def fix_contiguous_array(img:np.ndarray)->np.ndarray:
@@ -53,11 +55,12 @@ def fill_pad_image(img:np.ndarray,pad_y:int,pad_x:int,reserve_first_channels:boo
         return new_img
     return img
 
-def rgb_to_grayscale(img:np.ndarray,channel_axis=-1,shrink_axis:bool=True,contiguous:bool=True)->np.ndarray:
+def rgb_to_grayscale(img:np.ndarray,channel_axis=-1,shrink_axis:bool=True,equal_split:bool=False,contiguous:bool=True)->np.ndarray:
     """RGB to grayscale ndarray conversion."""
-    if len(img.shape)==0 or len(img.shape)>channel_axis or img.shape[channel_axis]<3:
+    if len(img.shape)==0 or 0<=channel_axis<len(img.shape) or img.shape[channel_axis]<3:
         raise ValueError(f"Axis {channel_axis} dimension of input array must be at least 3; shape {img.shape} was found.")
-    new_img=np.sum([w*np.take(img,i if shrink_axis else [i],axis=channel_axis) for i,w in enumerate([0.2989,0.587+0.114])],axis=0).astype(img.dtype)
+    img_weights=[0.3333,0.3333,0.3334] if equal_split else [0.2989,0.587,0.114]
+    new_img=np.sum([w*np.take(img,i if shrink_axis else [i],axis=channel_axis) for i,w in enumerate(img_weights)],axis=0).astype(img.dtype)
     if contiguous:
         new_img=fix_contiguous_array(new_img)
     return new_img
@@ -71,6 +74,46 @@ def map_matrix_to_image(matrix:np.ndarray,colors_list:list)->np.ndarray:
         for idx,c in enumerate(colors_list):
             img[img[:,:,0]==idx,:]=c
         return img
+
+def generate_characters_tiles(height:int,width:int,downscale:int=1,fill_value=0xFF)->np.ndarray:
+    """Return characters as flattened tiles."""
+    characters=[" "]*0x21+[chr(k) for k in range(0x21,0x7F)]+[" "]*0x81
+    txt="".join(characters)
+    start_fontsize=max(1,min(height,width)//max(1,int(downscale)))
+    fontsize=start_fontsize
+###    system_fonts=[k.split(os.sep)[-1] for k in mfontm.findSystemFonts(fontpaths=None,fontext="ttf")]
+    font=None
+    allowed_fonts=["OCRAEXT.TTF","CascadiaMono.ttf","consolab.ttf","Lucida-Console.ttf","couri.ttf"]
+    text_shape=[]
+    for font_name in allowed_fonts:
+        fontsize=start_fontsize+1
+        try:
+            valid_fond=False
+            while fontsize>=4 and not valid_fond:
+                fontsize-=1
+                font=ImageFont.truetype(font_name,fontsize)
+                text_shape=np.array(list(font.getbbox(txt)[2:4][::-1]),dtype=np.uint16)
+                text_ratio=text_shape/start_fontsize
+                text_ratio[1]/=len(characters)
+                if np.max(text_ratio)<=1.:
+                    valid_fond=True
+            if valid_fond:
+                break
+        except OSError:
+            pass
+    if font is None:
+        fontsize=start_fontsize
+        text_shape=[start_fontsize,start_fontsize]
+    np_image=np.full((text_shape[0],text_shape[1],3),0xFF,dtype=np.uint8,order="C")
+    image=Image.fromarray(np_image)
+    draw=ImageDraw.Draw(image)
+    draw.text((0,0),txt,font=font,fill=(0,0,0,255))
+    draw.text((0,height),"."*len(txt),font=font,fill=(0,0,0,255))
+    np_image=np.asarray(image)
+    np_image=np.where(np_image<0xA0,0,fill_value).astype(np.uint8)
+    tiles=tile_split(np_image,text_shape[0],text_shape[1]//len(txt),contiguous=False)
+    tiles=fix_contiguous_array(tiles[0,:,:height,:width//2])
+    return tiles
 
 def generate_gif_from_numpy(np_imgs:list,outfile_or_buff:Union[str,BytesIO,None]=None,return_buff:bool=True,frame_duration:int=200,loop:bool=False)->Union[bool,BytesIO]:
     """Build an image from a list of ndarrays."""

@@ -61,24 +61,24 @@ def script_core_load_custom_save_from_starting_event(env,name:str="",*args,**kwa
     return False
 
 def script_npc_text_vanish_chance(env,*args,**kwargs)->bool:
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     interactions=env.get_npc_configs(env.last_npc_name)["interactions"]
     if interactions>1 and (np.random.rand()<0.5 or interactions>2):
         env.modify_npc_configs(env.last_npc_name,{"state":0})
     return True
 
 def script_npc_text(env,*args,**kwargs)->bool:
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     return False
 
 def script_npc_text_once(env,*args,**kwargs)->bool:
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     env.modify_npc_configs(env.last_npc_name,{"state":0})
     return True
 
 def script_invert_direction_text(env,*args,**kwargs)->bool:
     env.add_forced_movement_invert_direction()
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     return False
 
 def script_ledge_down(env,*args,**kwargs)->bool:
@@ -109,7 +109,7 @@ def script_npc_battle_vanish(env,*args,**kwargs)->bool:
     return ret
 
 def script_gift_creature(env,*args,**kwargs)->bool:
-    env.game_state["text_type"]=1
+    env.show_npc_text()
     interactions=env.get_npc_configs(env.last_npc_name)["interactions"]
     if interactions==1:
         env.set_first_party_creature(*args[0])
@@ -138,6 +138,7 @@ def script_professor(env,*args,**kwargs)->bool:
         env.modify_npc_configs("flower_city_lady",{"state":0})
         env.modify_npc_configs("flower_city_elderly_man",{"state":0})
         env.activate_event_reward_flag("encounters_tracker")
+        env.drop_item_by_str("shop_pack")
     return False
 
 def script_exit_lab_without_start_decision(env,*args,**kwargs)->bool:
@@ -178,11 +179,14 @@ def script_elderly_man(env,*args,**kwargs)->bool:
 def script_shop_pack(env,*args,**kwargs)->bool:
     if env.get_event_flag("shop_pack")==0:
         env.activate_event_reward_flag("shop_pack")
+#        env.set_item_by_str("shop_pack")
         return False
     return script_shop(env)
 
 def script_world_map(env,*args,**kwargs)->bool:
     if env.get_event_flag("encounters_tracker")>0:
+#        if env.get_event_flag("world_map")==0:
+#            env.set_item_by_str("world_map")
         env.activate_event_reward_flag("world_map")
     return False
 
@@ -197,6 +201,8 @@ def script_stone_city_tour_guy(env,*args,**kwargs)->bool:
 def script_club1_leader(env,*args,**kwargs)->bool:
     if env.get_event_flag("medal1")>0 or script_npc_battle(env,*args,moves_penalty=0.75):
         env.modify_npc_configs("stone_city_tour_guy",{"state":0})
+        if env.get_event_flag("medal1")==0:
+            env.set_item_by_str("l_atk_01")
         env.activate_event_reward_flag("medal1")
     return False
 
@@ -204,6 +210,8 @@ def script_odd_stone(env,*args,**kwargs)->bool:
     if env.get_event_flag("odd_stone")==0:
         for k in ["crescent_mountain_odd_stone1","crescent_mountain_odd_stone2"]:
             env.modify_npc_configs(k,{"state":0})
+#        if env.get_event_flag("odd_stone")==0:
+#            env.set_item_by_str("odd_stone")
         env.activate_event_reward_flag("odd_stone")
     return False
 
@@ -214,20 +222,28 @@ def script_odd_stone_validation(env,*args,**kwargs)->bool:
 
 def script_club2_leader(env,*args,**kwargs)->bool:
     if env.get_event_flag("medal2")>0 or script_npc_battle(env,*args,moves_penalty=0.8):
+        if env.get_event_flag("medal2")==0:
+            env.set_item_by_str("l_atk_02")
         env.activate_event_reward_flag("medal2")
     return False
 
 def script_bicycle_coupon(env,*args,**kwargs)->bool:
+#    if env.get_event_flag("bicycle_coupon")==0:
+#        env.set_item_by_str("bicycle_coupon")
     env.activate_event_reward_flag("bicycle_coupon")
     return False
 
 def script_old_rod(env,*args,**kwargs)->bool:
+#    if env.get_event_flag("old_rod")==0:
+#        env.set_item_by_str("old_rod")
     env.activate_event_reward_flag("old_rod")
     return False
 
 def script_transformed_scientist(env,*args,**kwargs)->bool:
     if env.get_npc_configs("sea_ranch_transformed_scientist")["x"]==4:
         env.modify_npc_configs("sea_city_guard",{"x":28})
+#        if env.get_event_flag("ship_ticket")==0:
+#            env.set_item_by_str("ship_ticket")
         env.activate_event_reward_flag("ship_ticket")
     else:
         env.modify_npc_configs("sea_ranch_transformed_scientist",{"y":2,"x":6,"direction":0},permanent=False)
@@ -267,6 +283,7 @@ def script_ship_validation(env,*args,**kwargs)->bool:
 def script_powerup_debush(env,*args,**kwargs)->bool:
     if env.get_event_flag("powerup_debush")==0:
         script_club_puzzle_initialize(env)
+        env.set_item_by_str("powerup_debush")
     env.activate_event_reward_flag("powerup_debush")
     return False
 
@@ -315,16 +332,21 @@ def script_club_puzzle_clear_cleanup(env,*args,**kwargs)->bool:
 def script_club3_leader(env,*args,**kwargs)->bool:
     if env.get_event_flag("medal3")>0 or script_npc_battle(env,*args,moves_penalty=0.8):
         script_club_puzzle_clear_cleanup(env)
+        if env.get_event_flag("medal3")==0:
+            env.set_item_by_str("l_atk_03")
         env.activate_event_reward_flag("medal3")
     return False
 
 def script_powerup_torch(env,*args,**kwargs)->bool:
     if env.get_event_flag("powerup_torch")==0 and env.check_creatures_owned(10):
+        env.set_item_by_str("powerup_torch")
         env.activate_event_reward_flag("powerup_torch")
     return False
 
 def script_bicycle_shop(env,*args,**kwargs)->bool:
     if env.get_event_flag("bicycle_coupon")>0:
+#        if env.get_event_flag("bicycle")==0:
+#            env.set_item_by_str("bicycle")
         env.activate_event_reward_flag("bicycle")
     return False
 
@@ -335,7 +357,9 @@ def script_earth_cave_torch_validation(env,*args,**kwargs)->bool:
 
 def script_club4_leader(env,*args,**kwargs)->bool:
     if env.get_event_flag("medal4")>0 or script_npc_battle(env,*args,moves_penalty=0.8):
-        env.activate_event_reward_flag("medal3")
+        if env.get_event_flag("medal4")==0:
+            env.set_item_by_str("l_atk_04")
+        env.activate_event_reward_flag("medal4")
     return False
 
 def script_commercial_shop_elevator(env,*args,**kwargs)->bool:
@@ -370,6 +394,8 @@ def script_evils_refuge_recruit_elevator_key(env,*args,**kwargs)->bool:
 
 def script_elevator_key(env,*args,**kwargs)->bool:
     env.modify_npc_configs("evils_refuge_elevator_key",{"state":0})
+#    if env.get_event_flag("elevator_key")==0:
+#        env.set_item_by_str("elevator_key")
     env.activate_event_reward_flag("elevator_key")
     return False
 
@@ -425,18 +451,26 @@ def script_evils_refuge_admin(env,*args,**kwargs)->bool:
 
 def script_ghost_radar(env,*args,**kwargs)->bool:
     env.modify_npc_configs("evils_refuge_ghost_radar",{"state":0})
+#    if env.get_event_flag("ghost_radar")==0:
+#        env.set_item_by_str("ghost_radar")
     env.activate_event_reward_flag("ghost_radar")
     return False
 
 def script_ghost_doll(env,*args,**kwargs)->bool:
+#    if env.get_event_flag("ghost_doll")==0:
+#        env.set_item_by_str("ghost_doll")
     env.activate_event_reward_flag("ghost_doll")
     return False
 
 def script_water_bottle(env,*args,**kwargs)->bool:
+#    if env.get_event_flag("water_bottle")==0:
+#        env.set_item_by_str("water_bottle")
     env.activate_event_reward_flag("water_bottle")
     return False
 
 def script_powerup_teleport(env,*args,**kwargs)->bool:
+    if env.get_event_flag("powerup_teleport")==0:
+        env.set_item_by_str("powerup_teleport")
     env.activate_event_reward_flag("powerup_teleport")
     return False
 
@@ -464,10 +498,14 @@ def script_teleport_to_kidnapped_elderly_house(env,*args,**kwargs)->bool:
     return False
 
 def script_megaphone(env,*args,**kwargs)->bool:
+    if env.get_event_flag("megaphone")==0:
+        env.set_item_by_str("megaphone")
     env.activate_event_reward_flag("megaphone")
     return False
 
 def script_super_rod(env,*args,**kwargs)->bool:
+#    if env.get_event_flag("super_rod")==0:
+#        env.set_item_by_str("super_rod")
     env.activate_event_reward_flag("super_rod")
     return False
 

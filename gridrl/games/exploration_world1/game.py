@@ -15,7 +15,6 @@ if __package__ is None or len(__package__)==0:
         __file__=""
     sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}{os.sep}..{os.sep}..")
 #    sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}{os.sep}..{os.sep}..{os.sep}abstract_games")
-
 try:
     from gridrl.core_constants import (meadow_tile_id,water_tile_id,
         ground_tile_id,snow_tile_id,
@@ -23,6 +22,8 @@ try:
         waterfall_tile_id,breakable_rock_tile_id,mountain_climb_tile_id,
         breakable_frozen_rock_tile_id)
     from gridrl.abstract_games.exploration_abstract_game import ExplorationAbstractGame
+    from gridrl.games.exploration_world1.menu import ExplorationWorld1Menu
+    from gridrl.games.exploration_world1.constants import powerups_list
 except ModuleNotFoundError:
     from core_constants import (meadow_tile_id,water_tile_id,
         ground_tile_id,snow_tile_id,
@@ -30,10 +31,8 @@ except ModuleNotFoundError:
         waterfall_tile_id,breakable_rock_tile_id,mountain_climb_tile_id,
         breakable_frozen_rock_tile_id)
     from abstract_games.exploration_abstract_game import ExplorationAbstractGame
-
-"""
-"""
-
+    from games.exploration_world1.menu import ExplorationWorld1Menu
+    from games.exploration_world1.constants import powerups_list
 
 __all__=["ExplorationWorld1Game"]
 
@@ -60,6 +59,8 @@ class ExplorationWorld1Game(ExplorationAbstractGame):
         self.action_break_rock_id=0
         self.action_mountain_climb_id=0
         self.action_break_frozen_rock_id=0
+        self.powerups_ids=np.array([i for i,k in enumerate(powerups_list)],dtype=np.uint8,order="C")
+        self.powerups_action_ids={}
 ##################
 ### SUPER INIT ###
 ##################
@@ -68,6 +69,9 @@ class ExplorationWorld1Game(ExplorationAbstractGame):
 #################################
 ### GAME SPECIFIC DEFINITIONS ###
 #################################
+    def get_menu_class(self)->Any:
+        """Return the class of the menu object."""
+        return ExplorationWorld1Menu
     def game_enforce_config(self,config:dict)->dict:
         """Alter the configurations dict to enforce specific options."""
         config["screen_observation_type"]=max(0,min(3,int(config.get("screen_observation_type",-1))))
@@ -90,35 +94,48 @@ class ExplorationWorld1Game(ExplorationAbstractGame):
     def define_game_config(self,config:dict)->None:
         """Game-specific configurations initialization."""
         super().define_game_config(config)
-        self.sandbox=bool(config.get("sandbox",False))
         if self.sandbox:
             sandbox_start_pos=[0x1C,6,5,0]
             self.set_start_positions(start=sandbox_start_pos,checkpoint=sandbox_start_pos)
             self.starting_event=""
-            self.starting_collected_flags=[f"medal{i:d}" for i in range(1,9)]
-            self.starting_collected_flags+=[f"powerup_{k[4:]}" for k in self.get_game_powerup_tiles_dict().keys()]
+            self.starting_collected_flags=["exiting_first_town"]
+            self.starting_collected_flags+=[f"medal{i:d}" for i in range(1,9)]
+            self.starting_collected_flags+=[f"powerup_{k[4:]}" for k,_ in self.get_game_powerup_tiles_dict().items()]
+            self.starting_collected_flags+=powerups_list
     def define_internal_data(self)->None:
         """Game-specific attribute declarations."""
         super().define_internal_data()
     def define_actions_ids(self)->int:
         """Custom game actions id declaration."""
         super().define_actions_ids()
-        self.action_debush_id=self.action_interact_id+1
-        self.action_swim_id=self.action_interact_id+2
-        self.action_teleport_id=self.action_interact_id+3
-        self.action_cross_whirlpool_id=self.action_interact_id+4
-        self.action_cross_waterfall_id=self.action_interact_id+5
-        self.action_break_rock_id=self.action_interact_id+6
-        self.action_mountain_climb_id=self.action_interact_id+7
-        self.action_break_frozen_rock_id=self.action_interact_id+8
+        base_action_id=self.action_menu_max_id if self.true_menu else self.action_interact_id
+        self.action_debush_id=base_action_id+1
+        self.action_swim_id=base_action_id+2
+        self.action_teleport_id=base_action_id+3
+        self.action_cross_whirlpool_id=base_action_id+4
+        self.action_cross_waterfall_id=base_action_id+5
+        self.action_break_rock_id=base_action_id+6
+        self.action_mountain_climb_id=base_action_id+7
+        self.action_break_frozen_rock_id=base_action_id+8
+        self.powerups_action_ids={
+            "powerup_debush":self.action_debush_id,
+            "powerup_swim":self.action_swim_id,
+            "powerup_teleport":0,#self.action_teleport_id,
+            "powerup_cross_whirlpool":self.action_cross_whirlpool_id,
+            "powerup_cross_waterfall":self.action_cross_waterfall_id,
+            "powerup_break_rock":self.action_break_rock_id,
+            "powerup_mountain_climb":self.action_mountain_climb_id,
+            "powerup_break_frozen_rock":self.action_break_frozen_rock_id,
+        }
         if not self.bypass_powerup_actions:
             return 5#8
         return 0
     def define_extra_game_state(self)->dict:
         """Dict of extra values preserved in the game_state dictionary."""
         state=super().define_extra_game_state()
-        state.update({"money":0,"party_size":0,
+        state.update({"money":0,"party_size":0,"bag_size":0,
             "encounter_steps":0,
+            "bag":np.zeros((1,2),np.uint8,order="C"),
             "party_levels":np.zeros((1,),np.uint8,order="C"),
             "party_hp_ratios":np.zeros((1,),np.float32,order="C"),
         })
@@ -170,6 +187,26 @@ class ExplorationWorld1Game(ExplorationAbstractGame):
     def get_game_attribute_state_names(self)->list[str]:
         """List of game-specific attribute names preserved in a save state."""
         return []
+###########################
+### STRUCTURE FUNCTIONS ###
+###########################
+    def get_powerup_id(self,idx:int)->int:
+        """Return the powerup id."""
+        return idx
+    def use_powerup(self,powerup_id:int)->bool:
+        """Binds usage of the field move withing the environment."""
+        if powerup_id in self.powerups_ids:
+            action_id=self.powerups_action_ids.get(powerups_list[powerup_id],0)
+            if action_id>0:
+                self.add_forced_action(action_id)
+                return True
+        return False
+###############################
+### STRUCTURES CONDITIONALS ###
+###############################
+    def can_use_powerup(self,powerup_id)->None:
+        """Is allowed to use the powerup."""
+        return self.get_event_flag(f"can_{powerups_list[powerup_id][8:]}")>0
 ##################
 ### GAME LOGIC ###
 ##################

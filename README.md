@@ -15,7 +15,7 @@ Environment state is small and contains only relevant data, so this is a good pl
 
 Getting Started
 ===============
-The script is currently tested on Python 3.10, more versions will be checked and supported in the future.
+The script is currently tested on Python 3.10 and 3.11, more versions will be checked and supported in the future.
 Minimal experience of gymnasium environment structure and Reinforcement Learning is required.
 An examples using Stable-Baselines3 PPO algorithm is currently provided. Pufferlib-CleanRL implementation in project.
 
@@ -59,7 +59,6 @@ Games follow a minimalist minimalist 2D grid-based approach, where the agent mov
 Multiple small maps are provided and assembled into a bigger global world, that can also include warps. Relevent events required for any progression of the game are given a dedicated flag, so it's possible to easily track the agent progress or start at custom points.
 A hook system provides relevant bindings to the coder, that can implement custom calls before/after something occurs, like stepping on a warp.
 The action space and game complexity can be partially altered by configurations, changing the way the agent moves, input/menu abstraction or filler events amount. Some games can override certain fields.
-Some configurations are not yet coded and must be done on a per-game basis.
 The hidden game state is as small as possible and most of the work needed for a smarter/faster policy, will be done by feature and reward enginering on spatial data that the agent can collect.
 
 
@@ -80,8 +79,8 @@ config=dict(
 ## 0: Only directions, bypass powerups actions. Agent must step over checkpoints only
 ## 1: Adds an interaction button (for checkpoints) and powerups
 ## 2: Adds NPC
-## 3: Adds menu (to implement)
-    action_complexity= 2,        
+## 3: Adds menu
+    action_complexity= 3,        
 ## Format of the screen observation space. Default: -1
 ## -1: Infer. Generally it's the highest implemented settings
 ## 0: No screen - 1: Tile matrix - 2: OneHot - 3: Monocromatic-RGB - 4: Assets-RGB
@@ -143,10 +142,10 @@ Compatibility
 Games
 * Complete exploration_world1 main progress (currently at 60%)
 * Complete creatures_world1 main progress (halted before 40%)
-* Add abstractions for menu handling
+* ~~Add abstractions for menu handling~~
 * Add abstractions and better data structure for creatures_world1 battle system
-* Menu rendering
-* Find a way to prevent abuse of Teleport powerup on modes not relying on menu (too disruptive)
+* ~~Menu rendering~~
+* Set Teleport powerup to be accessible only in menu mode (too disruptive otherwise)
 * Set an extra frame for warps transitions
 * More games archetypes
 
@@ -159,12 +158,13 @@ Environment
 * Multi-action wrappers
 * Partial state randomization or perturbation
 * Improve environment validation for custom games
-* Scripting for custom NPC suggesting informative data like coordinates
+* Scripting for custom NPC suggesting informative data like coordinates or text
 * Random dummy NPC generation
-* Direct text interactions. Data provided as raw string and partially encoded on the screen
+* ~~Direct text interactions. Data provided as raw string and partially encoded on the screen.~~
 * Boilerplate routines for dataset generation, used for offline-learning
 
 Deterministic agents
+* Generic pathfinder boilerplate
 * Build more fixed algorithm on a per-game basis
 
 Customization

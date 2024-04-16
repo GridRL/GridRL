@@ -155,7 +155,6 @@
 "filler|map0x02_idx4_npc4": [["0x02", 25, 26, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
 "filler|map0x03_idx1_npc1": [["0x03", 2, 20, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
 "filler|map0x03_idx10_npc9": [["0x03", 12, 4, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
-"filler|map0x03_idx6_npc5": [["0x03", 12, 28, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
 "filler|map0x03_idx4_npc3": [["0x03", 18, 15, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
 "filler|map0x03_idx3_npc2": [["0x03", 20, 31, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 
 "filler|map0x03_idx5_npc4": [["0x03", 21, 9, 0, 10, 1, 0, 0], ["script_npc_text_vanish_chance", []]], 

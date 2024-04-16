@@ -66,8 +66,9 @@ class ExplorationAbstractGame(GameCore):
         self.swimmable_tiles=np.array(swimmable_tiles_ids,dtype=np.uint8)
     def define_actions_ids(self)->int:
         """Custom game actions id declaration."""
-        self.action_debush_id=self.action_interact_id+1
-        self.action_swim_id=self.action_interact_id+2
+        base_action_id=self.action_menu_max_id if self.true_menu else self.action_interact_id
+        self.action_debush_id=base_action_id+1
+        self.action_swim_id=base_action_id+2
         if not self.bypass_powerup_actions:
             return 2
         return 0
@@ -93,6 +94,8 @@ class ExplorationAbstractGame(GameCore):
 ####################
     def get_current_max_action_space(self)->int:
         """Returns the max value of the action space depending on powerups."""
+        if self.true_menu:
+            return self.action_menu_max_id+1
         max_actions=self.action_interact_id
         if self.get_event_flag("can_debush")>0:
             max_actions=self.action_debush_id
@@ -113,6 +116,10 @@ class ExplorationAbstractGame(GameCore):
         """Game-specific logic for non-movement buttons."""
         (skip_movement,powerup_started)=(True,False)
         self.game_state["powerup_screen_remove_tile"]=0
+        if self.true_menu and action==self.action_menu_id:
+            if self.game_state["menu_type"]==0:
+                self.game_state["menu_type"]=1
+            return (skip_movement,powerup_started)
         if action==self.action_debush_id and self.get_event_flag("can_debush")>0:
             if self.game_state["powerup_walk_tile"]==0:
                 self.game_state["powerup_walk_tile"]=bush_tile_id

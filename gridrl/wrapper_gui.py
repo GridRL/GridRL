@@ -38,7 +38,7 @@ class GuiWrapper:
         if collected_flags is None:
             collected_flags=[]
         config=dict(env_config)
-        config.update({"from_gui":True,"log_screen":False,
+        config.update({"from_gui":True,#"log_screen":False,
             "screen_downscale":1,"grayscale_screen":False,
             "max_steps":-1,"infinite_game":True,"movement_max_actions":4})
         if len(starting_event)>0:
@@ -170,11 +170,12 @@ class GuiWrapper:
         if event is None:
             return
         with self.lock:
-            swap_axis=int(self.screen_movement_axis)
-            self.screen_movement_axis=not self.screen_movement_axis
-            movement_offs=self.get_coordinates_from_tk_event(event)-self.env.player_screen_position
-            if movement_offs[0]<self.env.player_screen_bounds[1] and movement_offs[1]<self.env.player_screen_bounds[3]:
-                self.pending_inputs+=[self.click_actions[4]]+[self.click_actions[(i^int(swap_axis))*2+(0 if s>0 else 1)] for i,s in enumerate(movement_offs[slice(None,None,-1 if swap_axis else None)]) for j in range(np.abs(s))]
+            if self.env.game_state["menu_type"] in {0,2}:
+                swap_axis=int(self.screen_movement_axis)
+                self.screen_movement_axis=not self.screen_movement_axis
+                movement_offs=self.get_coordinates_from_tk_event(event)-self.env.player_screen_position
+                if movement_offs[0]<self.env.player_screen_bounds[1] and movement_offs[1]<self.env.player_screen_bounds[3]:
+                    self.pending_inputs+=[self.click_actions[4]]+[self.click_actions[(i^int(swap_axis))*2+(0 if s>0 else 1)] for i,s in enumerate(movement_offs[slice(None,None,-1 if swap_axis else None)]) for j in range(np.abs(s))]
     def reset_state(self,*args,**kwargs)->None:
         """Reset the game to the initial state."""
         with self.lock:
@@ -229,7 +230,7 @@ class GuiWrapper:
         self.window.mainloop()
     def run_quit(self,steps:int=-1)->None:
         """Main loop saving screenshots on quit."""
-        self.screenshot_on_quit=True
+        self.screenshot_on_quit=self.env.log_screen
         self.env.max_steps=steps
         self.run()
         sys.exit(1)

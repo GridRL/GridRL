@@ -120,7 +120,12 @@ if not HAS_MODULE_KERAS:
             num_classes=np.max(x)+1
         batch_size=x.shape[0]
         categorical=np.zeros((batch_size,num_classes),dtype=dtype,order="C")
-        categorical[np.arange(batch_size),x]=1
+        try:
+            categorical[np.arange(batch_size),x]=1
+        except IndexError:
+            num_classes=int(np.max(x))+1
+            categorical=np.zeros((batch_size,num_classes),dtype=dtype,order="C")
+            categorical[np.arange(batch_size),x]=1
         output_shape=input_shape+(num_classes,)
         categorical=np.reshape(categorical,output_shape)
         return categorical

@@ -2,7 +2,7 @@
 
 """Benchmarking utility functions."""
 
-from typing import Any
+from typing import Any,Callable
 import sys
 import time
 import numpy as np
@@ -22,7 +22,7 @@ else:
 def get_benchmark_env_base_configs()->dict:
     """Get default settings for the benchmarked environment."""
     return {"movement_max_actions":4,"max_steps":-1,"action_nop":False,
-        "log_screen":False,"hsv_image":False}
+        "validate_environment":False,"log_screen":False,"hsv_image":False}
 
 def bench_core_with_actions_internal(env:Any,actions:np.ndarray,verbose:bool=True)->bool:
     """Core benchmarking running run_action_on_emulator from predefined actions."""
@@ -30,6 +30,13 @@ def bench_core_with_actions_internal(env:Any,actions:np.ndarray,verbose:bool=Tru
         try:
             for a in actions:
                 env.run_action_on_emulator(a)
+                env.step_count+=1
+        except NotImplementedError:
+            return False
+    elif hasattr(env,"force_menu") and hasattr(env,"menu_state_menu") and hasattr(env,"step"):
+        try:
+            for a in actions:
+                env.step(a)
         except NotImplementedError:
             return False
     else:
@@ -43,7 +50,7 @@ def bench_step_with_actions_internal(env:Any,actions:np.ndarray,verbose:bool=Tru
     for a in actions:
         try:
             step_data=env.step(a)
-            if step_data[2]:
+            if step_data is not None and step_data[2]:
                 env.reset()
         except NotImplementedError:
             if verbose:
@@ -56,7 +63,7 @@ def bench_step_predict_internal(env:Any,total_steps:int,verbose:bool=True,**kwar
     for _ in range(total_steps):
         try:
             step_data=env.step(env.predict_action())
-            if step_data[2]:
+            if step_data is not None and step_data[2]:
                 env.reset()
         except NotImplementedError:
             if verbose:
@@ -64,7 +71,7 @@ def bench_step_predict_internal(env:Any,total_steps:int,verbose:bool=True,**kwar
             return False
     return True
 
-def benchmark_envs(envs:list,steps:int=50000,warmup:int=10000,
+def benchmark_envs(envs:list,steps:int=50000,warmup:int=10000,action_space_size:int=0,
     seed:int=7,show_screen:bool=True,verbose:bool=True)->list:
     """Benchmark a list of environments."""
     bench_envs=envs if isinstance(envs,(list,tuple)) else [envs]
@@ -80,8 +87,9 @@ def benchmark_envs(envs:list,steps:int=50000,warmup:int=10000,
     bench_names=["CORE-EMU-ENV1"]+[f"ENV{i+1:d}-STEP" for i in range(len(bench_envs))]
     bench_env_idxs=[0]+list(range(len(bench_envs)))
     bench_results=[]
-    actions_emu=np.random.randint(0,bench_envs[0].movement_max_actions,total_steps)
-    actions_steps=[np.random.randint(0,bench_envs[0].movement_max_actions,total_steps)
+    used_action_space_size=max(1,bench_envs[0].movement_max_actions if action_space_size<2 else action_space_size)
+    actions_emu=np.random.randint(0,used_action_space_size,total_steps)
+    actions_steps=[np.random.randint(0,used_action_space_size,total_steps)
         for env in bench_envs]
     for i,(bfunc,bname,env_idx) in enumerate(zip(bench_funcs,bench_names,bench_env_idxs)):
         bench_envs[env_idx].reset(seed=seed)
@@ -153,14 +161,50 @@ def benchmark_env_multiconfig(env_class,configs_list:list,steps:int=50000,
         print("\n".join([k[1] for k in sorted(bench_str_results,key=lambda x:x[0])]))
     return bench_results
 
+def profiler_function_monitor(func:Callable):
+    """Count function calls."""
+    def decorating_function(*args,**kwargs):
+        """Decorator."""
+        decorating_function.calls+=1
+        return func(*args,**kwargs)
+    decorating_function.calls=0
+    return decorating_function
+
+def get_env_methods_names(env:Any)->list:
+    """Return a list with all environment method names."""
+    return [k for k in dir(env) if not k.startswith("__") and not k.endswith("__") and callable(getattr(env,k))]
+
+def wrap_env_with_profiler_function_monitor(env:Any)->Any:
+    """Wrap all environment methods to count calls."""
+    method_names=get_env_methods_names(env)
+    for m in method_names:
+        setattr(env,m,profiler_function_monitor(getattr(env,m)))
+    return env
+
+def print_wrapped_profiler_results(env:Any,steps:int)->Any:
+    """Print calls results of a wrapped environment."""
+    method_names=get_env_methods_names(env)
+    sorted_calls_data=sorted([[m,getattr(env,m).calls] for m in method_names if hasattr(getattr(env,m),"calls")],key=lambda x:(-x[1],x[0]))
+    for scd in sorted_calls_data:
+        if scd[1]<1:
+            break
+        print(f"\t{scd[1]:d}\t{float(scd[1])/max(1,steps):.1%}\t{scd[0]}")
+
 def profile_env(env,steps:int=50000,interval:float=0.0001,fallback_banchmark:bool=True)->None:
     """Run pyinstrument profile."""
     if PYINSTRUMENT_PROFILER:
-        actions=np.random.randint(0,env.movement_max_actions+1,steps)
+        actions=np.random.randint(0,env.movement_max_actions+1,max(100,steps))
+        copy_env=env.deepcopy()
         with Profiler(interval=interval) as profiler:
             for act in actions:
-                env.step(act)
+                copy_env.step(act)
         profiler.print()
+        print("Repeating to count functions calls.")
+        copy_env=wrap_env_with_profiler_function_monitor(copy_env)
+        actions=actions[:actions.shape[0]//20]
+        for act in actions:
+            copy_env.step(act)
+        print_wrapped_profiler_results(copy_env,actions.shape[0])
     else:
         print("Couldn't load [pyinstrument] package to profile. Run pip install pyinstrument.")
         if fallback_banchmark:

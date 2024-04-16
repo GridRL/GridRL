@@ -117,9 +117,17 @@ tile_id_colors_dict=OrderedDict([
     ("item_up_tile_id",[0x7F,0x5F,0xDF]),
 ### MENU
     ("generic_menu_tile_id",[0xFF,0xFF,0xFF]),
-    ("generic_text_tile_id",[0x00,0x00,0x00]),
     ("generic_cursor_tile_id",[0x00,0x00,0x00]),
+    ("generic_text_tile_id",[0x00,0x00,0x00]),
 ])
+
+
+shrinked_characters_list=["E","A","T","O","I","N","S","H","R","U"]+["D","L"]
+tiles_count_without_characters_encoding=len(tile_id_colors_dict)
+for _ in range(0xFF-len(tile_id_colors_dict)-len(shrinked_characters_list)**2,-1,-1):
+    tile_id_colors_dict[f"unused_tile{_:d}_id"]=[0x00,0x00,0x00]
+for _ in range(len(shrinked_characters_list)**2-1,-1,-1):
+    tile_id_colors_dict[f"enc_character{_:d}_tile_id"]=[_+0x01,_+0x01,_+0x01]
 
 TILES=IntEnum("TILES",list(tile_id_colors_dict.keys()),start=0)
 
@@ -204,9 +212,10 @@ item_left_tile_id,
 item_right_tile_id,
 item_up_tile_id,
 generic_menu_tile_id,
-generic_text_tile_id,
 generic_cursor_tile_id,
-count_tiles_ids)=list(range(len(tile_id_colors_dict)+1))
+generic_text_tile_id,
+count_non_characters_ids)=list(range(tiles_count_without_characters_encoding+1))
+count_tiles_ids=len(tile_id_colors_dict)
 
 special_walkable_tiles_ids=[
     warp_tile_id,active_script_tile_id,

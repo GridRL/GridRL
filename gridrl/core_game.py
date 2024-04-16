@@ -6,6 +6,7 @@ from typing import Union,Any
 from collections import deque,OrderedDict
 from copy import deepcopy
 import warnings
+import struct
 import sys
 import time
 from io import BytesIO
@@ -16,11 +17,12 @@ warnings.filterwarnings("ignore",category=DeprecationWarning)
 if __package__ is None or len(__package__)==0:
     from configs_speedup_dependencies import lru_cache_func
     from functions_data import get_function_from_self_or_scope,pickle_load,pickle_save,filter_dict_key_depending_on_npc
-    from functions_images import tile_split,fill_pad_image,rgb_to_grayscale,map_matrix_to_image,generate_gif_from_numpy,show_image
+    from functions_images import tile_split,fill_pad_image,rgb_to_grayscale,map_matrix_to_image,generate_characters_tiles,generate_gif_from_numpy,show_image
     from functions_port_dependencies import rgb_to_hsv,hsv_to_rgb,downscale_local_mean,to_categorical
 #    from functions_numba import initialize_numba_functions,nb_is_point_inside_area#,nb_in_array_uint8,nb_assign_uint8_2d,nb_assign_int16,nb_assign_int16_2d,nb_sum_int16
     from game_module_selector import GameModuleSelector
-    from core_constants import (no_map_tile_id,unwalkable_tile_id,walk_tile_id,
+    from core_constants import (shrinked_characters_list,
+        no_map_tile_id,unwalkable_tile_id,walk_tile_id,
         warp_tile_id,
         ledge_down_tile_id,ledge_left_tile_id,ledge_right_tile_id,ledge_up_tile_id,
         water_tile_id,bush_tile_id,
@@ -32,17 +34,19 @@ if __package__ is None or len(__package__)==0:
         active_script_tile_id,old_script_tile_id,active_reward_tile_id,old_reward_tile_id,
         player_down_tile_id,npc_down_tile_id,npc_left_tile_id,npc_right_tile_id,npc_up_tile_id,
         generic_menu_tile_id,
+        generic_cursor_tile_id,
         count_tiles_ids,
         walkable_tiles_ids,tile_id_colors_list,
     )
 else:
     from gridrl.configs_speedup_dependencies import lru_cache_func
     from gridrl.functions_data import get_function_from_self_or_scope,pickle_load,filter_dict_key_depending_on_npc
-    from gridrl.functions_images import tile_split,fill_pad_image,rgb_to_grayscale,map_matrix_to_image,generate_gif_from_numpy,show_image
+    from gridrl.functions_images import tile_split,fill_pad_image,rgb_to_grayscale,map_matrix_to_image,generate_characters_tiles,generate_gif_from_numpy,show_image
     from gridrl.functions_port_dependencies import rgb_to_hsv,hsv_to_rgb,downscale_local_mean,to_categorical
 #    from gridrl.functions_numba import initialize_numba_functions,nb_is_point_inside_area#,nb_in_array_uint8,nb_assign_uint8_2d,nb_assign_int16,nb_sum_int16
     from gridrl.game_module_selector import GameModuleSelector
-    from gridrl.core_constants import (no_map_tile_id,unwalkable_tile_id,walk_tile_id,
+    from gridrl.core_constants import (shrinked_characters_list,
+        no_map_tile_id,unwalkable_tile_id,walk_tile_id,
         warp_tile_id,
         ledge_down_tile_id,ledge_left_tile_id,ledge_right_tile_id,ledge_up_tile_id,
         water_tile_id,bush_tile_id,
@@ -54,6 +58,7 @@ else:
         active_script_tile_id,old_script_tile_id,active_reward_tile_id,old_reward_tile_id,
         player_down_tile_id,npc_down_tile_id,npc_left_tile_id,npc_right_tile_id,npc_up_tile_id,
         generic_menu_tile_id,
+        generic_cursor_tile_id,
         count_tiles_ids,
         walkable_tiles_ids,tile_id_colors_list,
     )
@@ -144,6 +149,7 @@ class GameCore(GameAbstractCore):
         self.game_selector=GameModuleSelector(game_name=game_name,ignore_custom=ignore_custom)
         self.scripting_core_scope=self.game_selector.fallback_get_scripting_module()
         self.agent=None
+        self.menu=None
         self.seed=0
         self.step_count=0
         self.game_completed=False
@@ -175,12 +181,33 @@ class GameCore(GameAbstractCore):
         self.true_menu=bool(config.get("true_menu",False))
         self.action_complexity=max(-2,min(4,int(config.get("action_complexity",-1))))
         self.screen_observation_type=max(-1,min(4,int(config.get("screen_observation_type",-1))))
+        menu_class=self.get_menu_class()
         self.rewind_states_deque=deque(maxlen=1024)
         self.last_action=0
+        self.text_queue=[]
+        self.text_changed_during_step=True
+        self.menu_changed_during_step=True
+        self.menu_current_depth=-1
+        self.menu_content_by_depth=[[] for i in range(8)]
+        self.menu_bg_by_depth=np.zeros((8,5),dtype=np.int16,order="C")
+        self.menu_cursor_data=np.zeros((8,7,),dtype=np.int16,order="C")
+        self.last_gfx_menu_overlap=np.zeros((1,),dtype=np.uint8,order="C")
+        self.shrinked_characters_list=deepcopy(shrinked_characters_list)
+        self.convertion_dict={"A":"A","B":"T","C":"H","D":"U","E":"E","F":"N","G":"I",
+            "H":"H","I":"I","J":"E","K":"A","L":"R","M":"H","N":"N",
+            "O":"O","P":"T","Q":"U","R":"R","S":"S","T":"T",
+            "U":"U","V":"A","W":"S","X":"U","Y":"O","Z":"U",
+            " ":"D","\t":"D","\r":"D","\n":"D","-":"L",
+            "0":"U","1":"E","2":"A","3":"T","4":"O",
+            "5":"I","6":"N","7":"S","8":"H","9":"R"}
+        self.encoded_characters_lookup=np.full((256,),len(self.shrinked_characters_list)-1,dtype=np.uint8,order="C")
+        for k,v in self.convertion_dict.items():
+            self.encoded_characters_lookup[ord(k)]=self.shrinked_characters_list.index(v)
+            self.encoded_characters_lookup[ord(k.lower())]=self.shrinked_characters_list.index(v)
         for _ in range(2):
             if self.action_complexity==-1:
                 if self.true_menu:
-                    self.action_complexity=3
+                    self.action_complexity=2 if menu_class is None else 3
                 elif self.using_npcs:
                     self.action_complexity=2
                 elif self.button_interaction:
@@ -197,10 +224,10 @@ class GameCore(GameAbstractCore):
                 (self.bypass_powerup_actions,self.button_interaction,self.using_npcs,self.true_menu)=(True,False,False,False)
             elif self.action_complexity==1:
                 (self.bypass_powerup_actions,self.button_interaction,self.using_npcs,self.true_menu)=(False,True,False,False)
-            elif self.action_complexity>=2:
+            elif self.action_complexity==2:
                 (self.bypass_powerup_actions,self.button_interaction,self.using_npcs,self.true_menu)=(False,True,True,False)
-###            elif self.action_complexity>3:
-###                (self.movement_max_actions,self.bypass_powerup_actions,self.button_interaction,self.using_npcs,self.true_menu)=(4,False,True,True,True)
+            elif self.action_complexity>2:
+                (self.movement_max_actions,self.bypass_powerup_actions,self.button_interaction,self.using_npcs,self.true_menu)=(4,False,True,True,True)
             if self.use_gfx_image and not self.using_npcs:
                 self.screen_observation_type=max(0,min(3,self.screen_observation_type))
                 self.action_complexity=max(0,min(1,self.action_complexity))
@@ -208,8 +235,16 @@ class GameCore(GameAbstractCore):
                 self.use_gfx_image=False
             else:
                 break
+        if self.true_menu:
+            menu_class=self.get_menu_class()
+            if menu_class is None:
+                self.true_menu=False
+            else:
+                self.menu=menu_class(self)
         self.log_screen=bool(config.get("log_screen",False))
+        self.gif_speedup=int(config.get("gif_speedup",-1))
         self.max_steps=int(max(-1,config.get("max_steps",2**31)))
+        self.no_assets=bool(config.get("no_assets",False))
         self.totally_headless=self.screen_observation_type==0 and self.auto_screen_obs and not self.log_screen
         self.action_directions=np.array([0,2,3,1],np.uint8)
         self.inverted_directions=np.array([1,0,3,2,4],np.uint8)
@@ -239,15 +274,18 @@ class GameCore(GameAbstractCore):
         self.global_map=fill_pad_image(self.global_map,*self.global_map_padding,reserve_first_channels=True,fill_value=no_map_tile_id)
         self.call_direct_script("script_core_set_start_positions")
         self.last_checkpoint_place=self.first_checkpoint_place.copy()
-        should_load_gfx=(self.use_gfx_image or self.from_gui) and "global_starting_coords" in self.game_data
+        #self.no_assets=True
+        should_load_gfx=not self.no_assets and (self.use_gfx_image or self.from_gui) and "global_starting_coords" in self.game_data
         self.tile_id_colors_lookup=np.array(tile_id_colors_list,dtype=np.uint8,order="C")
         self.global_map_gfx=self.game_selector.fallback_read_map_png() if should_load_gfx else np.zeros((16,16,3),dtype=np.uint8,order="C")
         self.sprites_gfx=self.game_selector.fallback_read_sprites_png() if should_load_gfx else np.zeros((16,16,3),dtype=np.uint8,order="C")
+        self.characters_gfx=generate_characters_tiles(self.scaled_sprites_size,self.scaled_sprites_size,downscale=1,fill_value=0xFF) if should_load_gfx else np.zeros((256,16,9,3),dtype=np.uint8,order="C")
         self.global_map_gfx_padding=self.tile_size*(self.centered_screen_size//2)
         self.tile_color_players=np.array([self.tile_id_colors_lookup[player_down_tile_id].tolist(),[0x9F,0x4F,0x4F]],dtype=np.uint8,order="C")
         if grayscale_screen:
             self.tile_color_players=rgb_to_grayscale(self.tile_color_players,shrink_axis=grayscale_single_channel)
             self.tile_id_colors_lookup=rgb_to_grayscale(self.tile_id_colors_lookup,shrink_axis=grayscale_single_channel)
+            self.characters_gfx=rgb_to_grayscale(self.characters_gfx,shrink_axis=grayscale_single_channel,equal_split=True)
             self.global_map_gfx=rgb_to_grayscale(self.global_map_gfx,shrink_axis=grayscale_single_channel)
             self.sprites_gfx=rgb_to_grayscale(self.sprites_gfx,shrink_axis=grayscale_single_channel)
         if should_load_gfx and (np.prod(np.array(self.global_map_gfx.shape[:2]))<160000) or (np.prod(np.array(self.sprites_gfx.shape[:2]))<4096):
@@ -275,13 +313,20 @@ class GameCore(GameAbstractCore):
         self.call_direct_script("script_core_set_automatic_map_ids")
         self.action_nop_id=self.movement_max_actions
         self.action_interact_id=self.action_nop_id+(1 if self.button_interaction and self.action_nop else 0)
+        self.action_back_id=self.action_interact_id+1
+        self.action_menu_id=self.action_interact_id+2
+        self.action_extra_id=self.action_interact_id+3
+        self.action_menu_max_id=self.action_extra_id
+        defined_actions_powerups_ids_count=self.define_actions_ids()
         extra_action_space=0
         if self.action_nop:
             extra_action_space+=1
         if self.button_interaction:
             extra_action_space+=1
-            if not self.bypass_powerup_actions:
-                extra_action_space+=self.define_actions_ids()
+            if self.true_menu:
+                extra_action_space+=3
+            elif not self.bypass_powerup_actions:
+                extra_action_space+=defined_actions_powerups_ids_count
         self.secondary_action_value=0
         self.forced_directional_movements=[]
         self.reward_range=(0,15000)
@@ -317,6 +362,7 @@ class GameCore(GameAbstractCore):
         self.call_direct_script("script_core_set_extra_event_names")
         self.reset_event_flags(False)
         self.infinite_game=bool(config.get("infinite_game",False))
+        self.sandbox=bool(config.get("sandbox",False))
         self.define_game_config(config)
         self.history_tracking={
             "visited_maps":np.zeros_like(self.global_map,dtype=np.uint8,order="C"),
@@ -327,13 +373,15 @@ class GameCore(GameAbstractCore):
             "last_suggested_coordinates":np.zeros((4,),np.int16,order="C"),
             "previous_map_id":self.first_checkpoint_place[0],
             "powerup_walk_tile":0,"powerup_screen_remove_tile":0,"powerup_screen_fix_tile":0,"powerup_started":0,
-            "player_level":0,"text_type":0,"battle_type":0,"loss_count":0,"pseudo_seed":0,
+            "player_level":0,"loss_count":0,"pseudo_seed":0,
+            "menu_type":0,"sub_menu_type":0,"text_type":0,"battle_type":0,
             "event_flags":np.zeros((len(self.event_flags_lookup),),dtype=np.uint8,order="C"),
             "game_minimal_screen":np.zeros(self.centered_screen_size.tolist(),dtype=np.uint8,order="C"),
         }
         self.stacked_state={}
         self.game_state.update(self.define_extra_game_state())
         self.stacked_state.update(self.define_extra_stacked_state())
+        self.define_game_config_post_game_state_creation(config)
         if agent_class is not None:
 ###         self.load_custom_save_from_events(self.starting_event,self.starting_collected_flags)
             self.agent=agent_class(self,**{**kwargs,**agent_args})
@@ -555,6 +603,9 @@ class GameCore(GameAbstractCore):
 #################################
 ### GAME SPECIFIC DEFINITIONS ###
 #################################
+    def get_menu_class(self)->Any:
+        """Return the class of the menu object."""
+        return None
     def game_enforce_config(self,config:dict)->dict:
         """Alter the configurations dict to enforce specific options."""
         return config
@@ -573,6 +624,8 @@ class GameCore(GameAbstractCore):
     def define_game_config(self,config:dict)->None:
         """Game-specific configurations initialization."""
         return
+    def define_game_config_post_game_state_creation(self,config:dict)->None:
+        """Game-specific configurations initialization run after game state declaration."""
     def define_internal_data(self)->None:
         """Game-specific attribute declarations."""
         return
@@ -848,6 +901,9 @@ class GameCore(GameAbstractCore):
     def reset_forced_directional_movements(self)->None:
         """Clear all forced movements."""
         self.forced_directional_movements.clear()
+    def add_forced_action(self,action:int)->None:
+        """Add a forced action to the queue. Used to set powerup actions from menu."""
+        self.forced_directional_movements.append(action)
     def add_forced_directional_movements(self,direction:int)->None:
         """Add a forced directional movement to the queue."""
         self.forced_directional_movements.append(direction)
@@ -938,6 +994,128 @@ class GameCore(GameAbstractCore):
         move_direction=direction if tile_jump_direction<4 else tile_move_direction
         movement_count=valid_movements_count.get(tile_id,1)
         return (force_movement,force_movement or tile_jump_direction>=4,move_direction,movement_count)
+############
+### MENU ###
+############
+    def has_menu(self)->bool:
+        """Return if any menu is linked."""
+        return self.menu is not None
+    def set_menu(self,menu,recursion_depth:int=0)->None:
+        """Link an menu to the game."""
+        self.menu=menu
+        if recursion_depth<2 and hasattr(self.menu,"set_env"):
+            self.menu.set_env(self,recursion_depth+1)
+    def clear_text(self)->None:
+        """Clears the text queue."""
+        if len(self.text_queue)>0:
+            self.text_queue.clear()
+            self.text_changed_during_step=True
+    def set_text(self,text:str=None,append:bool=False,max_line_size:int=16)->None:
+        """Correctly set or append text to the queue."""
+        self.text_changed_during_step=True
+        if not self.true_menu or text is None:
+            self.game_state["text_type"]=1
+        else:
+            if not append:
+                self.clear_text()
+            new_queue=[k[i:i+max_line_size] for k in text.split("\n") for i in range(0,len(k),max_line_size)]
+            self.text_queue.extend(new_queue)
+    def step_text(self,max_lines:int=2,single_line:bool=True,keep_end:bool=False)->bool:
+        """Slice the displayed text at the bottom of the screen."""
+        self.text_changed_during_step=True
+        if len(self.text_queue)>max_lines:
+            self.text_queue=self.text_queue[1 if single_line else max_lines:]
+        else:
+            if not keep_end:
+                self.clear_text()
+            return True
+        return False
+    def set_placeholder_npc_text(self)->None:
+        """Set placeholder text for NPC."""
+        if self.has_menu() and len(self.text_queue)==0:
+            self.clear_text()
+            self.menu.set_npc_text_with_presses_count("NPC text.")
+    def show_npc_text(self):
+        """Prepare settings to display NPC text."""
+        if self.game_state["menu_type"]==0:
+            if self.has_menu():
+                self.menu.return_to_text_menu()
+            else:
+                self.game_state["text_type"]=1
+            self.set_placeholder_npc_text()
+    def close_menu(self):
+        """Close any menu."""
+        if self.has_menu():
+            self.menu.return_to_overworld()
+        self.game_state["menu_type"]=0
+        self.game_state["text_type"]=0
+    def clear_menu_content(self,until_depth=-1,sticky_text:bool=False):
+        """Clear any menu string data until a depth."""
+        if self.menu_current_depth<0:
+            return
+        self.menu_changed_during_step=True
+        for i in ([self.menu_current_depth] if until_depth<0 else range(self.menu_current_depth,until_depth-1,-1)):
+            self.menu_content_by_depth[i].clear()
+            self.menu_bg_by_depth[i,:]=0
+            self.menu_cursor_data[i,:]=0
+        if not sticky_text:
+            self.clear_text()
+        self.menu_current_depth=max(0,until_depth)-1
+    def append_menu_content(self,y_tile_pos:int,x_tile_pos:int,text:str=0):
+        """Append string data at the current given position."""
+        self.menu_content_by_depth[self.menu_current_depth].append([y_tile_pos,x_tile_pos,text])
+    def append_multiple_menu_contents(self,y_tile_pos:int,x_tile_pos:int,vertical:bool=True,text_list:list=None,clear_content:bool=False,sticky_text:bool=True):
+        """Append a list of strings data continously."""
+        if clear_content and self.menu_current_depth>=0:
+            self.menu_content_by_depth[self.menu_current_depth].clear()
+        if not sticky_text:
+            self.clear_text()
+        if text_list is None:
+            return
+        self.menu_changed_during_step=True
+        if vertical:
+            for i,k in enumerate(text_list):
+                self.env.append_menu_content(y_tile_pos+i,x_tile_pos,k)
+        else:
+            for i,k in enumerate(text_list):
+                self.env.append_menu_content(y_tile_pos,x_tile_pos+i,k)
+    def increment_menu_depth(self,y1:int,x1:int,y2:int,x2:int,displayed:bool=True)->None:
+        """Increment the menu depth and set the bg area."""
+        self.menu_changed_during_step=True
+        self.menu_current_depth=min(7,self.menu_current_depth+1)
+        vals=[y1,x1,y2,x2,displayed]
+        for i in range(0,3,2):
+            if vals[i]<0:
+                vals[i]+=self.centered_screen_size[0]
+        for i in range(1,4,2):
+            if vals[i]<0:
+                vals[i]+=self.centered_screen_size[1]
+        self.menu_bg_by_depth[self.menu_current_depth,:]=vals
+    def set_menu_cursor_origin(self,y_tile_pos:int,x_tile_pos:int,vertical:bool=True,displayed:bool=True,value:int=0)->None:
+        """Set the origin position of a cursor."""
+        self.menu_cursor_data[self.menu_current_depth,:4]=[y_tile_pos,x_tile_pos,vertical,displayed]
+        self.set_menu_cursor_value(value)
+    def set_menu_cursor_value(self,value:int)->None:
+        """Set the current position of a cursor relative to its origin."""
+        self.menu_cursor_data[self.menu_current_depth,4]=value
+        self.menu_cursor_data[self.menu_current_depth,5:7]=self.menu_cursor_data[self.menu_current_depth,:2]
+        self.menu_cursor_data[self.menu_current_depth,5 if self.menu_cursor_data[self.menu_current_depth,2]>0 else 6]+=value
+    def set_new_menu_layer(self,y1:int,x1:int,y2:int,x2:int,displayed:bool=True,
+        y_cursor:int=0,x_cursor:int=0,vertical:bool=True,displayed_cursor:bool=True,value:int=0,
+    sticky_text:bool=False,clear_until_depth:int=-2)->None:
+        """Increment the menu depth and set background and cursor values."""
+        if clear_until_depth>-2:
+            self.clear_menu_content(clear_until_depth,sticky_text)
+        self.increment_menu_depth(y1,x1,y2,x2,displayed)
+        self.set_menu_cursor_origin(y_cursor,x_cursor,vertical,displayed_cursor,value)
+    @lru_cache_func(maxsize=65536)
+    def encode_text_to_tiles(self,txt:str)->np.ndarray:
+        """Convert text to tiles_id. Each tile encodes 2 characters."""
+        if len(txt)%2==1:
+            txt+=" "
+        enc_characters=np.take(self.encoded_characters_lookup,np.array(struct.unpack(f"{len(txt):d}B",bytes(txt,"ascii")),dtype=np.uint8,order="C"),axis=0)
+        enc_tiles=0xFF-enc_characters[::2]-len(self.shrinked_characters_list)*enc_characters[1::2]
+        return enc_tiles
 ############################
 ### GLOBAL-MAP FUNCTIONS ###
 ############################
@@ -1283,10 +1461,70 @@ class GameCore(GameAbstractCore):
                 off=self.player_screen_position+self.get_direction_offset(self.game_state["player_coordinates_data"][3])
                 self.game_state["game_minimal_screen"][off[0],off[1]]=self.fix_tile(self.game_state["game_minimal_screen"][off[0],off[1]])
         self.hook_update_overworld_screen()
+    @lru_cache_func(maxsize=1024)
+    def get_string_position(self,y_pos:int,x_pos:int,use_characters:bool)->np.ndarray:
+        """Return the real start position of the string."""
+        pos=np.array([y_pos,x_pos,0,0],dtype=np.int16,order="C")
+        for i in range(2):
+            if pos[i]<0:
+                pos[i]+=self.centered_screen_size[i]
+        if use_characters:
+            pos*=self.scaled_sprites_size
+        pos[2:4]=pos[:2]
+        return pos
+    def draw_tile_string(self,y_pos:int,x_pos:int,text:str)->None:
+        """Draw the encoded text tiles screen."""
+        pos=self.get_string_position(y_pos,x_pos,False)
+        chr_tiles=self.encode_text_to_tiles(text)
+        try:
+            if pos[1]+len(chr_tiles)>=self.centered_screen_size[1]:
+                raise ValueError()
+            self.game_state["game_minimal_screen"][pos[0],pos[1]:pos[1]+len(chr_tiles)]=chr_tiles
+        except (ValueError,IndexError):
+            for i,tile in enumerate(chr_tiles):
+                try:
+                    self.game_state["game_minimal_screen"][pos[0],pos[1]+i]=tile
+                except IndexError:
+                    break
     def update_text_screen(self)->None:
         """Draw the text screen."""
-        if not self.totally_headless:
+        if not self.totally_headless and self.screen_observation_type<4:
             self.game_state["game_minimal_screen"][-3:]=generic_menu_tile_id
+            self.set_placeholder_npc_text()
+            if len(self.text_queue)>0:
+                self.draw_tile_string(-2,1,self.text_queue[0])
+    def update_menu_screen(self)->None:
+        """Draw the menu screen."""
+        if self.totally_headless:
+            return
+        if not self.true_menu:
+            self.game_state["game_minimal_screen"][:,-5:]=generic_menu_tile_id
+            return
+        if self.menu_current_depth<0:
+            if self.game_state["text_type"]>0:
+                self.update_text_screen()
+            return
+        if self.screen_observation_type>=4:
+            return
+        if self.menu_current_depth>=0:
+            shapes_differ=len(self.last_gfx_menu_overlap)<2 or not np.array_equal(self.last_gfx_menu_overlap.shape,self.game_state["game_minimal_screen"].shape)
+            if self.menu_changed_during_step or shapes_differ:
+                for i in range(self.menu_current_depth+1):
+                    bg=self.menu_bg_by_depth[i]
+                    if bg[4]>0:
+                        self.game_state["game_minimal_screen"][bg[0]:bg[2],bg[1]:bg[3]]=generic_menu_tile_id
+                    for mc in self.menu_content_by_depth[i]:
+                        self.draw_tile_string(*mc[:3])
+                if shapes_differ:
+                    self.last_gfx_menu_overlap=self.game_state["game_minimal_screen"].copy()
+                else:
+                    self.last_gfx_menu_overlap[:]=self.game_state["game_minimal_screen"]
+            else:
+                self.game_state["game_minimal_screen"][:]=self.last_gfx_menu_overlap
+            if self.menu_cursor_data[self.menu_current_depth,3]>0:
+                self.game_state["game_minimal_screen"][self.menu_cursor_data[self.menu_current_depth,5],self.menu_cursor_data[self.menu_current_depth,6]]=generic_cursor_tile_id
+        if self.game_state["text_type"]>0:
+            self.update_text_screen()
     def draw_monocromatic_player(self,img:np.ndarray,upscale:int=1)->np.ndarray:
         """Draw the player in monocromatic mode."""
         img[upscale*self.player_screen_position[0]:upscale*self.player_screen_position[0]+upscale,upscale*self.player_screen_position[1]:upscale*self.player_screen_position[1]+upscale]=self.tile_color_players[0]
@@ -1299,7 +1537,7 @@ class GameCore(GameAbstractCore):
         img=map_matrix_to_image(self.game_state["game_minimal_screen"],self.tile_id_colors_lookup)
         if upscale>1:
             img=np.repeat(np.repeat(img,upscale,axis=0),upscale,axis=1)
-            if draw_player_direction:
+            if draw_player_direction and self.game_state["menu_type"]<2:
                 img=self.draw_monocromatic_player(img,upscale)
         return img
     def draw_gfx_npc(self,img:np.ndarray,sprite_id:int,direction:int,position:np.ndarray,upscale:int=1,apply_tile_offset:bool=False)->np.ndarray:
@@ -1319,29 +1557,97 @@ class GameCore(GameAbstractCore):
     def draw_gfx_player(self,img:np.ndarray,upscale:int=1)->np.ndarray:
         """Draw the player from preloaded sprites."""
         return self.draw_gfx_npc(img,0,self.game_state["player_coordinates_data"][3],self.player_screen_position,upscale)
+    def draw_gfx_string(self,img:np.ndarray,y_tile_pos:int,x_tile_pos:int,text:str,upscale:int=1)->np.ndarray:
+        """Draw the a string on screen from preloaded characters."""
+        pos=self.get_string_position(y_tile_pos,x_tile_pos,True)
+        idx_list=[]
+        for character in text:
+            idx=ord(character)
+            idx_list.append(idx)
+            if idx in {10,13}:
+                break
+        try:
+            img[pos[2]:pos[2]+self.characters_gfx.shape[1],pos[3]:pos[3]+len(idx_list)*self.characters_gfx.shape[2]]=np.hstack([self.characters_gfx[idx] for idx in idx_list],dtype=np.uint8)
+        except ValueError:
+            pos=pos.copy()
+            for idx in idx_list:
+                try:
+                    img[pos[2]:pos[2]+self.characters_gfx.shape[1],pos[3]:pos[3]+self.characters_gfx.shape[2]]=self.characters_gfx[idx]
+                except ValueError:
+                    break
+                if idx in {10,13}:
+                    pos[2]+=self.characters_gfx.shape[1]
+                    pos[3]=pos[1]
+                else:
+                    pos[3]+=self.characters_gfx.shape[2]
+        return img
+    def get_gfx_overworld_screen_view(self,upscale:int=1)->np.ndarray:
+        """Return the view of the current gfx screen."""
+        bounds=self.scaled_sprites_size*(self.game_state["player_coordinates_data"][9:11].repeat(2)+self.player_screen_bounds)+self.global_map_gfx_padding.repeat(2)
+        return self.global_map_gfx[bounds[0]:bounds[1],bounds[2]:bounds[3]]
+    def draw_gfx_text(self,img:np.ndarray)->np.ndarray:
+        """Draw the text."""
+        if len(self.text_queue)==0 and self.game_state["text_type"]==0:#or not self.text_changed_during_step
+            return img
+        img[-3*self.scaled_sprites_size:]=0xFF
+        for i,v in enumerate(self.text_queue[:2]):
+            img=self.draw_gfx_string(img,-2+i,1,v)
+        return img
+    def draw_gfx_menu(self,img:np.ndarray)->np.ndarray:
+        """Draw the menu."""
+        if self.menu_current_depth>=0:
+            shapes_differ=img is None or not np.array_equal(self.last_gfx_menu_overlap.shape,img.shape)
+            if (self.menu_changed_during_step and shapes_differ) or len(self.last_gfx_menu_overlap.shape)<2:
+                if len(self.last_gfx_menu_overlap.shape)<2:
+                    self.last_gfx_menu_overlap=self.get_gfx_overworld_screen_view().copy() if img is None else img.copy()
+                else:
+                    self.last_gfx_menu_overlap[:]=self.get_gfx_overworld_screen_view() if img is None else img
+            if self.menu_changed_during_step:
+                for i in range(self.menu_current_depth+1):
+                    bg=self.menu_bg_by_depth[i]
+                    if bg[4]>0:
+                        bg=bg.copy()*self.scaled_sprites_size
+                        self.last_gfx_menu_overlap[bg[0]:bg[2],bg[1]:bg[3]]=0xFF-i*0x1F
+                    for mc in self.menu_content_by_depth[i]:
+                        self.last_gfx_menu_overlap=self.draw_gfx_string(self.last_gfx_menu_overlap,*mc[:3])
+                img=self.last_gfx_menu_overlap.copy()
+            elif img is None or shapes_differ:
+                img=self.last_gfx_menu_overlap.copy()
+            else:
+                img[:]=self.last_gfx_menu_overlap
+            if self.menu_cursor_data[self.menu_current_depth,3]>0:
+                img=self.draw_gfx_string(img,*self.menu_cursor_data[self.menu_current_depth,5:7],">")
+        elif img is None:
+            img=self.get_gfx_overworld_screen_view().copy()
+        img=self.draw_gfx_text(img)
+        return img
     def get_gfx_agent_screen(self,upscale:int=1)->np.ndarray:
         """Draw the screen from preloaded tiles."""
-        bounds=self.scaled_sprites_size*(self.game_state["player_coordinates_data"][9:11].repeat(2)+self.player_screen_bounds)+self.global_map_gfx_padding.repeat(2)
-        img=self.global_map_gfx[bounds[0]:bounds[1],bounds[2]:bounds[3]].copy()
-        npc_max_coords=self.centered_screen_size if self.game_state["text_type"]==0 else self.centered_screen_size-np.array([3,0],dtype=np.int16)
-        for v in self.npcs_data_by_map.get(self.game_state["player_coordinates_data"][0],{}).values():
-            if v[0][5]!=1:
-                continue
-            rel_pos=v[1][0,:2]-self.game_state["player_coordinates_data"][1:3]+self.player_screen_position
-            if self.cached_is_point_inside_area(*rel_pos,0,0,*npc_max_coords):
-                img=self.draw_gfx_npc(img,v[0][4],v[1][0,2],rel_pos)
-        img=self.draw_gfx_player(img)
-        if self.hsv_image:
-            mono_img=np.full(img.shape,0xFF,dtype=img.dtype,order="C")
-            mono_img=self.get_monocromatic_agent_screen(self.scaled_sprites_size,draw_player_direction=False)
-            img=rgb_to_hsv(img)
-            mono_img=rgb_to_hsv(mono_img)
-            for ax,alpha in enumerate([0.25,0.75,0.5]):
-                img[:,:,ax]=alpha*img[:,:,ax]+(1.-alpha)*mono_img[:,:,ax]
-            img=hsv_to_rgb(img)
-            img=img.astype(np.uint8)
+        if self.game_state["menu_type"] in {0,2}:
+            img=self.get_gfx_overworld_screen_view().copy()
+            npc_max_coords=self.centered_screen_size if self.game_state["text_type"]==0 else self.centered_screen_size-np.array([3,0],dtype=np.int16)
+            for v in self.npcs_data_by_map.get(self.game_state["player_coordinates_data"][0],{}).values():
+                if v[0][5]!=1:
+                    continue
+                rel_pos=v[1][0,:2]-self.game_state["player_coordinates_data"][1:3]+self.player_screen_position
+                if self.cached_is_point_inside_area(*rel_pos,0,0,*npc_max_coords):
+                    img=self.draw_gfx_npc(img,v[0][4],v[1][0,2],rel_pos)
+            img=self.draw_gfx_player(img)
+            if self.hsv_image:
+                mono_img=np.full(img.shape,0xFF,dtype=img.dtype,order="C")
+                mono_img=self.get_monocromatic_agent_screen(self.scaled_sprites_size,draw_player_direction=False)
+                img=rgb_to_hsv(img)
+                mono_img=rgb_to_hsv(mono_img)
+                for ax,alpha in enumerate([0.25,0.75,0.5]):
+                    img[:,:,ax]=alpha*img[:,:,ax]+(1.-alpha)*mono_img[:,:,ax]
+                img=hsv_to_rgb(img)
+                img=img.astype(np.uint8)
+        else:
+            img=None
+        if self.game_state["menu_type"]>0:
+            img=self.draw_gfx_menu(img)
         elif self.game_state["text_type"]>0 and self.game_state["battle_type"]==0:
-            img[-3*int(img.shape[0]/self.centered_screen_size[0]):]=0xFF
+            img=self.draw_gfx_text(img)
         return img
     def get_agent_screen(self,upscale:int=1)->np.ndarray:
         """Return the agent screen."""
@@ -1364,19 +1670,24 @@ class GameCore(GameAbstractCore):
         self.gif_frames.clear()
     def add_gif_frame(self)->None:
         """Log a new screen to the gif list."""
-        self.gif_frames.append(self.get_agent_screen(5))
+        if hasattr(self,"game_state"):
+            self.gif_frames.append(self.get_agent_screen(5))
     def save_gif(self,outfile_or_buff:Union[str,BytesIO,None]=None,return_buff:int=True,delete_old:bool=True,speedup:int=4,loop:bool=False)->Union[bool,BytesIO]:
         """Builds the gif and save it to a file or buffer."""
-        for _ in range((4*speedup)-1):
+        if speedup<1:
+            used_speedup=1 if len(self.gif_frames)<200 else 4
+        else:
+            used_speedup=int(used_speedup)
+        for _ in range((4*used_speedup)-1):
             self.add_gif_frame()
-        ret=generate_gif_from_numpy(self.gif_frames,outfile_or_buff,return_buff,1000*24/60./max(1,int(speedup)),loop)
+        ret=generate_gif_from_numpy(self.gif_frames,outfile_or_buff,return_buff,1000*24/60./used_speedup,loop)
         if delete_old:
             self.reset_gif_frames()
         return ret
     def save_run_gif(self,delete_old:bool=True)->None:
         """User-friendly gif-save function."""
         if self.log_screen:
-            self.save_gif(f"{self.game_selector.selected_base_dir}run_t{int(time.time()):d}.gif",delete_old=delete_old,speedup=4)
+            self.save_gif(f"{self.game_selector.selected_base_dir}run_t{int(time.time()):d}.gif",delete_old=delete_old,speedup=self.gif_speedup)
 ##################
 ### DEBUG TEXT ###
 ##################
@@ -1426,7 +1737,10 @@ class GameCore(GameAbstractCore):
         extra_txt=""
         if self.action_nop and self.action_interact_id!=self.action_nop_id:
             extra_txt+=f"\tNo action:\t[{self.action_nop_id+1}]\n"
-        if self.button_interaction:
+        if self.true_menu:
+            extra_txt+=(f"\tInteractions:\t[{self.action_interact_id+1}] Interact - [{self.action_back_id+1}] Back"
+                f"- [{self.action_menu_id+1}] Menu - [{self.action_extra_id+1}] Extra\n")
+        elif self.button_interaction:
             extra_txt+=f"\tInteractions:\t[{self.action_interact_id+1}]\n"
             if self.bypass_powerup_actions:
                 extra_txt+="!!!\tPowerup-actions are bypassed by interacting !!!\n"
@@ -1716,10 +2030,19 @@ class GameCore(GameAbstractCore):
         """Load from a saved state dictionary."""
         if not isinstance(state,dict):
             return self.load_state(state.load_state()) if isinstance(state,GameCore) and state.check_recursion(1) else False
+        reserved_names=set(self.get_reserved_attribute_states_names()) if self.true_menu and self.menu is not None else set()
         for k in self.get_attribute_state_names():
-            if k in state and len(k)>0 and hasattr(self,k):
-                setattr(self,k,deepcopy(state[k]))
+            if k in state and len(k)>0 and (hasattr(self,k) or k in reserved_names):
+                if k=="reserved_menu_state":
+                    if self.true_menu and self.menu is not None and isinstance(state[k],dict):
+                        for sn,sv in state[k].items():
+                            if len(sn)>0 and hasattr(self.menu,sn):
+                                setattr(self.menu,sn,deepcopy(sv))
+                else:
+                    setattr(self,k,deepcopy(state[k]))
         self.clear_events_caches()
+        self.text_changed_during_step=True
+        self.menu_changed_during_step=True
         return True
     def rewind_state(self,saved_steps:int=1)->bool:
         """Load from internal save states of previous steps."""
@@ -1735,6 +2058,8 @@ class GameCore(GameAbstractCore):
     def save_state(self)->dict:
         """Save the current state to a dictionary."""
         state={k:deepcopy(getattr(self,k)) for k in self.get_attribute_state_names() if len(k)>0 and hasattr(self,k)}
+        if self.true_menu and self.menu is not None:
+            state["reserved_menu_state"]={k:deepcopy(getattr(self.menu,k)) for k in self.menu.get_attribute_state_names() if len(k)>0 and hasattr(self.menu,k)}
         return state
     def load_state_from_file(self,file_path:str)->dict:
         """Load a state from a pickle dumped file."""
@@ -1782,6 +2107,9 @@ class GameCore(GameAbstractCore):
     def get_extra_attribute_state_names(self)->list[str]:
         """List of extra attribute names preserved in a save state."""
         return []
+    def get_reserved_attribute_states_names(self)->list[str]:
+        """List of reserved attributes names for child objects preserved in a save state."""
+        return ["reserved_menu_state"]#,"reserved_agent_state"]
     def get_attribute_state_names(self)->set:
         """List of all attribute names preserved in a save state."""
         return set(["seed","step_count","game_completed","total_reward",
@@ -1789,9 +2117,12 @@ class GameCore(GameAbstractCore):
             "global_map_shapes","global_map_padding","global_map_gfx_padding","global_map",
             "event_rewards_powerups","event_rewards_data","scripts_data","npcs_data",
             "event_flags","event_rewards_data_by_map","scripts_data_by_map","npcs_data_by_map",
-            "npcs_map_lookup","last_npc_name","event_flags_lookup",
+            "npcs_map_lookup","last_npc_name","event_flags_lookup","last_checkpoint_place",
             "history_tracking","game_state","stacked_state",
-        ]+list(self.get_game_attribute_state_names())+list(self.get_extra_attribute_state_names()))
+            "text_queue","text_changed_during_step","menu_changed_during_step",
+            "menu_current_depth","menu_content_by_depth","menu_bg_by_depth","menu_cursor_data",
+        ]+self.get_reserved_attribute_states_names()+
+        list(self.get_game_attribute_state_names())+list(self.get_extra_attribute_state_names()))
 ##################################
 ### ENVIRONMENT-LIKE UTILITIES ###
 ##################################
@@ -1856,6 +2187,8 @@ class GameCore(GameAbstractCore):
         self.game_state["previous_map_id"]=map_id
         self.reset_forced_directional_movements()
         self.teleport_data.clear()
+        if self.has_menu():
+            self.menu.reset(seed)
         self.event_rewards_powerups=deepcopy(self.game_data["powerups"])
         self.event_rewards_data=deepcopy(self.filter_dict_cache(self.game_data["events"]))
         self.scripts_data=deepcopy(self.filter_dict_cache(self.game_data["scripts"]))
@@ -1904,6 +2237,8 @@ class GameCore(GameAbstractCore):
             v[1:,:]=v[0]
         self.step_count=0
         self.game_completed=False
+        if hasattr(self,"game_state") and hasattr(self,"env_config"):
+            self.define_game_config_post_game_state_creation(self.env_config)
         self.update_reward()
         if self.has_agent():
             self.agent.reset()
@@ -1912,12 +2247,17 @@ class GameCore(GameAbstractCore):
 ##################
 ### GAME LOGIC ###
 ##################
-    def game_handle_random_encounter_spawn(self,map_id:int,tile:int)->int:
-        """Handles random encounters. Return 0 without encounters, 1 on win, -1 on loss"""
-        return 0
+    def handle_menu_actions(self,action:int)->None:
+        """Perform a step in the menu."""
+        if self.has_menu():
+            self.menu.step_menu(action)
+            #self.menu_changed_during_step=True
     def handle_non_directional_actions(self,action:int)->tuple:
         """Game-specific logic for non-movement buttons."""
         return (True,False)
+    def game_handle_random_encounter_spawn(self,map_id:int,tile:int)->int:
+        """Handles random encounters. Return 0 without encounters, 1 on win, -1 on loss"""
+        return 0
     def game_bypass_powerup_tiles(self,tile:int)->None:
         """Automatic bypass actions of powerups if event prerequisites are met."""
         return
@@ -1935,8 +2275,15 @@ class GameCore(GameAbstractCore):
         return
     def run_action_on_emulator(self,action:int=-1)->bool:
         """Process one game frame."""
-        if self.game_state["text_type"]==0:
-            ret=self.run_overworld_action(action)
+        self.text_changed_during_step=False
+        self.menu_changed_during_step=False
+        if self.game_state["menu_type"]>0:
+            ret=self.run_menu_action(action)
+        elif self.game_state["text_type"]==0:
+            if self.has_menu() and self.menu.force_menu:
+                ret=self.run_menu_action(action)
+            else:
+                ret=self.run_overworld_action(action)
         elif self.game_state["battle_type"]>0:
             if not self.true_menu and (not self.button_interaction or self.benchmarking):
                 self.game_state["battle_type"]=0
@@ -1947,6 +2294,7 @@ class GameCore(GameAbstractCore):
                 ret=self.run_overworld_action(action)
             else:
                 ret=self.run_text_action(action)
+                self.update_text_screen()
         if self.log_screen:
             self.add_gif_frame()
         if ret and self.game_state["battle_type"]==0 and active_script_tile_id==self.global_map[self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]:
@@ -1954,22 +2302,68 @@ class GameCore(GameAbstractCore):
         self.game_after_step(action)
         self.hook_after_step(action)
         return ret
+    def run_menu_action(self,action:int=-1)->bool:
+        """Process any menu-related action."""
+        up_overworld=False
+        prev_menu=0x40*self.game_state["menu_type"]+self.game_state["sub_menu_type"]
+        if not self.true_menu:
+            self.game_state["menu_type"]=0
+            self.game_state["sub_menu_type"]=0
+            self.clear_menu_content(0)
+        elif self.game_state["menu_type"]==0:
+            if action==self.action_menu_id:
+                self.clear_menu_content(0)
+                self.handle_menu_actions(action)
+                if self.game_state["menu_type"]==0:
+                    self.game_state["menu_type"]=2
+            elif self.has_menu() and self.menu.force_menu:
+                self.handle_menu_actions(self.action_menu_id)
+        elif self.game_state["menu_type"]==2:
+            if action in {self.action_back_id,self.action_menu_id}:
+                self.clear_menu_content(0)
+                self.handle_menu_actions(self.action_back_id)
+                if self.game_state["menu_type"]!=0:
+                    self.game_state["menu_type"]=0
+                    self.game_state["sub_menu_type"]=0
+                up_overworld=True
+            else:
+                self.handle_menu_actions(action)
+                up_overworld=(self.screen_observation_type<4 and self.game_state["menu_type"]==0)
+        else:
+            self.handle_menu_actions(action)
+            up_overworld=(self.screen_observation_type<4 and self.game_state["menu_type"]==0)
+        if up_overworld:
+            self.update_overworld_screen()
+            if self.screen_observation_type<4:
+                if self.game_state["text_type"]>0:
+                    self.update_text_screen()
+        elif self.game_state["menu_type"]>0:
+            if prev_menu!=self.game_state["menu_type"]+100*self.game_state["sub_menu_type"]:
+                self.update_overworld_screen()
+            self.update_menu_screen()
+        return False
     def run_overworld_action(self,action:int=-1)->bool:
         """Process any overworld-related action."""
-        (skip_movement,powerup_started,should_check_script,warped,screen_update_fallback,npc_script_name,npc_script_args)=(False,False,True,False,True,None,[])
-        if len(self.forced_directional_movements)==0:
+        (forced_direction,skip_movement,powerup_started,should_check_script,warped,screen_update_fallback,npc_script_name,npc_script_args)=(
+            len(self.forced_directional_movements)>0,False,False,True,False,True,None,[])
+        if forced_direction:
+            action=self.forced_directional_movements.pop()
+            if action>=4:
+                forced_direction=False
+        if not forced_direction:
             if action<0:
                 action=self.action_nop_id
             exp_dir_mov=self.get_expected_direction_and_movement(self.movement_max_actions,action,
                 self.game_state["player_coordinates_data"][3])
             if action>=self.movement_max_actions:
+                if self.true_menu and action==self.action_menu_id and self.game_state["menu_type"]==0:
+                    return self.run_menu_action(self.action_menu_id)
                 (skip_movement,powerup_started)=self.handle_non_directional_actions(action)
             else:
                 self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
         else:
             exp_dir_mov=self.get_expected_direction_and_movement(4,
-                self.get_action_from_direction_offsets_4way(*self.get_direction_offset(
-                    self.forced_directional_movements.pop()
+                self.get_action_from_direction_offsets_4way(*self.get_direction_offset(action
                 )),self.game_state["player_coordinates_data"][3])
             self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
             should_check_script=False
@@ -1997,7 +2391,6 @@ class GameCore(GameAbstractCore):
             expected_tile=self.game_powerup_fix_tile(expected_tile,powerup_started)
             if self.is_walkable_tile_id(expected_tile,self.game_state["powerup_walk_tile"]) and self.special_tile_direction_check(expected_tile,self.game_state["player_coordinates_data"][3]):
                 self.game_powerup_first_time_use_events(action,expected_tile)
-
                 movements=[new_expected_coords]
                 if expected_tile==warp_tile_id and self.global_map[self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]!=warp_tile_id:
                     for w in self.get_cached_map_warps(self.game_state["player_coordinates_data"][0]):
@@ -2042,7 +2435,9 @@ class GameCore(GameAbstractCore):
             self.call_direct_script(npc_script_name,*npc_script_args)
             if not npc_script_name.startswith("script_npc_text"):
                 self.call_direct_script("script_npc_text")
-        if self.game_state["text_type"]>0:
+        if self.game_state["menu_type"]>0:
+            self.update_menu_screen()
+        elif self.game_state["text_type"]>0:
             self.update_text_screen()
         return should_check_script
     def run_battle_action(self,action:int=-1)->bool:
@@ -2054,6 +2449,8 @@ class GameCore(GameAbstractCore):
     def run_text_action(self,action:int=-1)->bool:
         """Process any text-related action."""
         if action==self.action_interact_id:
+            if self.has_menu():
+                self.menu.return_to_overworld()
             self.game_state["text_type"]=0
             self.update_overworld_screen()
         else:
@@ -2117,12 +2514,15 @@ class GameCore(GameAbstractCore):
 if __name__=="__main__":
     from cli import main_cli
     test_game_name=1
-    test_play=True
-    test_screen_mult=1
-    test_starting_event=""
+    test_mode="play"
+    test_action_complexity=4
+    test_screen_observation_type=4
+    test_screen_mult=2
+    test_starting_event="medal1"
     test_stdout=True
-    main_cli([test_game_name,"--mode",
-        "play" if test_play else "info",
+    main_cli([test_game_name,"--mode",test_mode,
+        "--action_complexity",test_action_complexity,
+        "--screen_observation_type",test_screen_observation_type,
         "--screen_view_mult",test_screen_mult,
         "--starting_event",test_starting_event,
         ]+(["-stdout"] if test_stdout else []))
