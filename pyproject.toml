@@ -1,6 +1,6 @@
 [project]
 name = "gridrl"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
     {name = "Sky", email = "gridrlgym@gmail.com"}
 ]
@@ -14,6 +14,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 requires-python = ">=3.9"
 
@@ -22,6 +23,7 @@ dependencies = [
     "pillow",
     "gymnasium>=0.29",
     "matplotlib",
+    "pandas",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +41,7 @@ gridrl = "gridrl.cli:main_cli"
 requires = [
     "setuptools>=61.0.0",
     "numpy",
+    "cython>=3.0.6; platform_python_implementation == 'CPython'",
 ]
 build-backend = "setuptools.build_meta"
 

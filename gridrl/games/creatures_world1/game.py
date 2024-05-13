@@ -59,9 +59,10 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     """The main implementation of the game creatures_world1."""
     has_encoded_assets=True
     def __init__(self,
-        config:dict={},
+        config:Union[dict,None]=None,
         agent_class:Union[Any,None]=None,
-        agent_args:dict={},*args,**kwargs
+        agent_args:Union[dict,None]=None,
+        *args,**kwargs
     )->None:
         """Constructor."""
         game_name="creatures_world1"
@@ -124,6 +125,8 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
             self.starting_collected_flags+=[f"powerup_{k[4:]}" for k,_ in self.get_game_powerup_tiles_dict().items()]
     def define_game_config_post_game_state_creation(self,config:dict)->None:
         """Game-specific configurations initialization run after game state declaration."""
+        if not self.using_npcs:
+            self.invincible=True
         if self.sandbox:
             self.set_first_party_creature()
             self.set_new_party_creature(4,15)
@@ -201,7 +204,7 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     def define_game_critical_event_names(self)->None:
         """Define first and last events of the game."""
         self.first_event_name="exiting_first_town"
-        self.trigger_done_event_name="megaphone"
+        self.trigger_done_event_name="victory_room"
     def game_on_event_custom_load(self,starting_event:str,used_collected_flags:set,used_level:int)->None:
         """Game-specific custom state load fixes."""
         if starting_event not in ["",self.first_event_name,"start_decision"]:
@@ -574,6 +577,7 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
     def headless_battle_internal(self,level:int,num:int=1,moves_penalty:float=1.,natural:bool=False)->bool:
         """Main battle logic."""
         lost=False
+        pp_natural_off=25000. if natural else 15000.
         for i in range(1 if natural or num<1 else min(6,int(num))):
             levels=[self.game_state["party_levels"][0],level]
             stats=[self.game_state["party_avg_stats"][0],self.calculate_creature_stats(level,300)]
@@ -587,7 +591,7 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
                     damage=damage_mults[idx]*self.get_headless_damage_formula(levels[idx],stats[idx],levels[idx^1],stats[idx^1],critical=False)
                     if pps[idx]>0.:
                         hps[idx^1]-=damage
-                        pps[idx]-=0.01+levels[idx]/15000.
+                        pps[idx]-=0.01+levels[idx]/pp_natural_off
                     else:
                         hps[idx]-=0.1
                         hps[idx^1]-=0.25*damage
@@ -620,4 +624,4 @@ class CreaturesWorld1Game(ExplorationAbstractGame):
         if self.invincible or (not lost and self.using_npcs):
             for i in range(self.game_state["party_size"]):
                 self.check_stats_evolution(i)
-        return not lost
+        return self.invincible or not lost

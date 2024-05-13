@@ -47,6 +47,7 @@ class ExplorationAbstractGame(GameCore):
         self.swimmable_tiles=np.array(swimmable_tiles_ids,dtype=np.uint8)
         self.action_debush_id=0
         self.action_swim_id=0
+        self.action_teleport_id=0
 ##################
 ### SUPER INIT ###
 ##################
@@ -69,6 +70,7 @@ class ExplorationAbstractGame(GameCore):
         base_action_id=self.action_menu_max_id if self.true_menu else self.action_interact_id
         self.action_debush_id=base_action_id+1
         self.action_swim_id=base_action_id+2
+        self.action_teleport_id=base_action_id+3
         if not self.bypass_powerup_actions:
             return 2
         return 0
@@ -88,15 +90,16 @@ class ExplorationAbstractGame(GameCore):
 #        return nb_in_array_uint8(tile_id,self.swimmable_tiles) if in_water else tile_id==water_tile_id
     def get_game_powerup_tiles_dict(self)->dict:
         """Return a dict with powerup keys and walkable tiles list as values."""
-        return {"can_debush":[bush_tile_id],"can_swim":[water_tile_id]}
+        return {"can_debush":[bush_tile_id],"can_swim":[water_tile_id],"can_teleport":[]}
 ####################
 ### ACTION SPACE ###
 ####################
+    @lru_cache_func(maxsize=1)
     def get_current_max_action_space(self)->int:
         """Returns the max value of the action space depending on powerups."""
         if self.true_menu:
-            return self.action_menu_max_id+1
-        max_actions=self.action_interact_id
+            return self.allowed_actions_count-1
+        max_actions=self.non_powerup_actions_count-1
         if self.get_event_flag("can_debush")>0:
             max_actions=self.action_debush_id
         return max_actions
@@ -127,6 +130,9 @@ class ExplorationAbstractGame(GameCore):
         elif action==self.action_swim_id and self.get_event_flag("can_swim"):
             if self.game_state["powerup_walk_tile"]!=water_tile_id!=self.game_data["maps"][self.game_state["player_coordinates_data"][0]][self.game_state["player_coordinates_data"][1],self.game_state["player_coordinates_data"][2]] and self.get_faced_tile()==water_tile_id:
                 (skip_movement,powerup_started,self.game_state["powerup_walk_tile"])=(False,True,water_tile_id)
+        elif action==self.action_teleport_id:
+            if self.get_event_flag("can_teleport")>0 and self.secondary_action_value>=0:
+                self.powerup_teleport_to(self.secondary_action_value)
         return (skip_movement,powerup_started)
     def game_bypass_powerup_tiles(self,tile:int)->None:
         """Automatic bypass actions of powerups if event prerequisites are met."""
@@ -162,11 +168,16 @@ class ExplorationAbstractGame(GameCore):
 ##################################
 ### AGENTS POWERUP SUGGESTIONS ###
 ##################################
+    def should_use_powerup_or_move_forward(self,can_powerup_name:str):
+        """Return 1 if the powerup should be used, 2 to move forward, otherwise 0."""
+        if self.get_event_flag(can_powerup_name)>0 and bush_tile_id==self.get_faced_tile():
+            return 1 if bush_tile_id!=self.game_state["powerup_walk_tile"] else 2
+        return 0
     def should_use_powerup_debush(self)->bool:
-        """Return True if the player is facing a bush and can remove it."""
+        """Return True if the player is facing a bush tile and can remove it."""
         return self.get_event_flag("can_debush")>0 and bush_tile_id==self.get_faced_tile()!=self.game_state["powerup_walk_tile"]
     def should_use_powerup_swim(self)->bool:
-        """Return True if the player is facing a water and can swim."""
+        """Return True if the player is facing a water tile and can swim."""
         return self.get_event_flag("can_swim")>0 and water_tile_id==self.get_faced_tile()!=self.game_state["powerup_walk_tile"]
 ##############################
 ### HEADLESS BATTLE SYSTEM ###

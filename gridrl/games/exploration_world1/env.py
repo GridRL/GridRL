@@ -2,6 +2,7 @@
 
 """Constants for the game exploration_world1."""
 
+from typing import Union,Any
 import sys
 import os
 sys.dont_write_bytecode=True
@@ -24,7 +25,12 @@ __all__=["ExplorationWorld1Env"]
 
 class ExplorationWorld1Env(ExplorationWorld1Game,GridRLAbstractEnv):
     """Environment declaration from ExplorationWorld1Game and GridRLAbstractEnv classes."""
-    def __init__(self,config:dict={},agent_class=None,agent_args:dict={},*args,**kwargs)->None:
+    def __init__(self,
+        config:Union[dict,None]=None,
+        agent_class:Union[Any,None]=None,
+        agent_args:Union[dict,None]=None,
+        *args,**kwargs
+    )->None:
         """Constructor to initialize Game and gymnasium Env inherited classes."""
         GridRLAbstractEnv.__init__(self,config)
         ExplorationWorld1Game.__init__(self,config=config,agent_class=agent_class,agent_args=agent_args,*args,**kwargs)

@@ -16,13 +16,15 @@ if __package__ is None or len(__package__)==0:
 else:
     from gridrl.core_environment import GridRLAbstractEnv
 
+__all__=["MenuBase"]
+
 if True:#not cython.compiled:
     M_actions=IntEnum("M_actions",["down","left","right","up","a","b","start","select"],start=0)
     M_overworld=IntEnum("M_overworld",["overworld"],start=0)
     M_unknown=IntEnum("M_unknown",["unknown"],start=0)
     M_text=IntEnum("M_text",["text"],start=0)
     M_menu=IntEnum("M_menu",["menu"],start=0)
-    
+
 class MenuBase:
     """Base Menu class to for a game."""
     def __init__(self,env:GridRLAbstractEnv,*args,**kwargs)->None:

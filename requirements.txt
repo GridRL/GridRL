@@ -2,3 +2,5 @@ numpy
 pillow
 gymnasium>=0.29
 matplotlib
+pandas
+cython>=3.0.6; platform_python_implementation == 'CPython'

@@ -27,7 +27,13 @@ else:
         MAP_PNG_FILENAME,SPRITES_PNG_FILENAME,
     )
 
-script_dir=f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
+#__all__=[]
+
+
+try:
+    script_dir=f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
+except NameError:
+    script_dir=f".{os.sep}"
 data_dir=f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}games{os.sep}exploration_world1{os.sep}"
 
 def get_function_from_self_or_scope(func_name:str,self:Any=None,scope_fn:Any=None)->Callable:
@@ -242,7 +248,7 @@ def read_teleport_data_file(dir_name:str="data",main_parent:str=data_dir)->dict:
     data={}
     file_data=read_json_file(format_child_filename_path(TELEPORT_DATA_FILENAME,dir_name,main_parent))
     if isinstance(file_data,dict) and len(file_data)>0:
-        data["teleport_data"]={k:[np.array([convert_hex_str(s) for s in v[0][:2]],dtype=np.int16),v[1]] for k,v in file_data.items()
+        data["teleport_data"]={convert_hex_str(k):[np.array([convert_hex_str(s) for s in v[0][:2]],dtype=np.int16),v[1]] for k,v in file_data.items()
             if not is_json_key_comment(k) and isinstance(v,(list,set,tuple,np.ndarray)) and len(v)>1 and
             isinstance(v[0],(list,set,tuple,np.ndarray)) and len(v[0])>1 and isinstance(v[1],str)
         }

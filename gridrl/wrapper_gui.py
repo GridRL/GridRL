@@ -10,6 +10,8 @@ import numpy as np
 from PIL import Image,ImageTk
 sys.dont_write_bytecode=True
 
+__all__=["GuiWrapper"]
+
 class TkStdoutRedirector:
     """Redirect stdout to tkinter textarea."""
     def __init__(self,text_widget:tk.Text)->None:
@@ -79,7 +81,7 @@ class GuiWrapper:
         self.window.bind("<s>",self.save_state)
         self.window.bind("<g>",self.change_gui_render)
         self.window.bind("<p>",self.follow_agent_path)
-        self.buttons_lookup={f"{self.env.get_powerup_button_text(i+1,True)}":i for i in range(self.env.all_actions_count)}
+        self.buttons_lookup={f"{self.env.get_powerup_button_text(i+1,True)}":i for i in range(self.env.allowed_actions_count)}
         for k,v in self.buttons_lookup.items():
             self.window.bind(k,lambda a=v:self.button_clicked(a))
         self.redirect_stdout=bool(redirect_stdout) and self.env.env_id==0
@@ -95,6 +97,9 @@ class GuiWrapper:
             "\tUI buttons:\t[R] Reset to initial state - [L] Load temp state - [S] Save temp state\n"
             "\t\t\t[G] Change GUI render - [P] Follow agent path\n" f"{'='*32}"
         )
+        event_flags=self.env.get_active_flags_names()
+        if len(event_flags)>0:
+            print(f"[Event flags]\n\t{', '.join(event_flags)}\n{'='*32}")
     def update_screen_shapes(self,update_og_size:bool=True)->None:
         """Updates screen shapes constants."""
         if update_og_size:
@@ -125,12 +130,15 @@ class GuiWrapper:
         with self.lock:
             if len(self.pending_inputs)>0:
                 used_inputs=list(self.pending_inputs[::-1])
-                self.pending_inputs=[]
+                self.pending_inputs.clear()
         if force or used_inputs[0]!=-1:
-            for action in used_inputs:
-                if self.env.step(action if action>=0 else self.env.action_nop_id)[2]:
-                    done=True
-                    break
+            if self.env.ui_input_allowed:
+                for action in used_inputs:
+                    if self.env.step(action if action>=0 else self.env.action_nop_id)[2]:
+                        done=True
+                        break
+            else:
+                self.env.step(self.action_nop_id)
             self.refresh_screen()
         if done:
             self.quit()

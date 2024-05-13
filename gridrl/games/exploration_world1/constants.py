@@ -5,6 +5,8 @@
 import sys
 sys.dont_write_bytecode=True
 
+__all__=["powerups_list","items_list"]
+
 powerups_list=["powerup_debush","powerup_swim","powerup_teleport","powerup_cross_whirlpool",
     "powerup_cross_waterfall","powerup_break_rock","powerup_mountain_climb","powerup_break_frozen_rock"]
 

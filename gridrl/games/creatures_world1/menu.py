@@ -17,7 +17,7 @@ if __package__ is None or len(__package__)==0:
     sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}{os.sep}..{os.sep}..")
 try:
     from gridrl.core_environment import GridRLAbstractEnv
-    from gridrl.menu_base import M_actions,M_overworld,M_unknown,M_text,M_menu
+    from gridrl.menu_base import MenuBase,M_actions,M_overworld,M_unknown,M_text,M_menu
     from gridrl.games.creatures_world1.constants import (
         moves_list,creatures_names,items_list,
     )
@@ -29,6 +29,8 @@ except ModuleNotFoundError:
     )
 
 sys.dont_write_bytecode=True
+
+__all__=["CreaturesWorld1Menu"]
 
 if True:#not cython.compiled:
     M_main_menu=IntEnum("M_main_menu",["m_overworld","m_unknown","m_text","m_menu","m_tracker","m_party",
@@ -129,6 +131,7 @@ class CreaturesWorld1Menu(MenuBase):
         """Text for player menu."""
         return ["Player",f"Money: {self.env.game_state['money']:d}"]#,f"Steps: {self.env.step_count:d}"]
     def return_to_bag_menu(self)->None:
+        """Open the bag manu."""
         self.set_menu(M_main_menu.m_bag,M_bag.bag)
         self.env.set_new_menu_layer(1,2,-2,self.env.centered_screen_size[1],
             y_cursor=2,x_cursor=2,vertical=True,value=self.menu_state_cursor_bag,clear_until_depth=1)

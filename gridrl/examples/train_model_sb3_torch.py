@@ -31,6 +31,7 @@ from example_environment import ExplorationWorld1ExampleEnv
 
 sys.dont_write_bytecode = True
 
+#__all__=[]
 
 def load_sb3_model(
     env: Any,

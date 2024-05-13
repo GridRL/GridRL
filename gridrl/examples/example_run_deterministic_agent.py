@@ -9,6 +9,7 @@ from example_agent import AgentRandomExample
 
 sys.dont_write_bytecode = True
 
+#__all__=[]
 
 def test_agent() -> None:
     """Testing if the agent is entering a seen warp."""

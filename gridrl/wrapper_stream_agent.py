@@ -14,6 +14,8 @@ with warnings.catch_warnings():
     import websockets
     from gymnasium import Env,Wrapper
 
+__all__=["StreamWrapper"]
+
 WEBSOCKET_SERVER_ADDRESS="ws://localhost:8080/broadcast"
 
 class StreamWrapper(Wrapper):

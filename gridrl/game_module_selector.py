@@ -23,10 +23,10 @@ else:
         read_map_png,read_sprites_png,copy_dir
     )
 
+__all__=["GAMES_LIST","GameModuleSelector","get_game_default_env_class"]
+
 LOADED_FROM_MODULE=str(__package__).split(".",maxsplit=1)[0]=="gridrl"
 repo_script_dir=f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
-
-__all__=["GAMES_LIST","GameModuleSelector","get_game_default_env_class"]
 
 class GameModuleSelector:
     """Class for selecting game data and implementing local game editing in the [custom_game] folder."""

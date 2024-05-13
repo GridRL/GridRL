@@ -9,6 +9,7 @@ from gridrl.agents import AgentRandomChaseWarps
 
 sys.dont_write_bytecode = True
 
+#__all__=[]
 
 class AgentRandomExample(AgentRandomChaseWarps):
     """Custom subclass of an existing agent environment."""

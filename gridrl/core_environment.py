@@ -9,25 +9,32 @@ import sys
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore",category=DeprecationWarning)
     import numpy as np
+    import pandas as pd
     import gymnasium
     from gymnasium import Env
-    from gymnasium.spaces import Discrete,Box,Dict
+    from gymnasium.spaces import Discrete,MultiDiscrete,MultiBinary,Box,Dict
+
 sys.dont_write_bytecode=True
 sys.modules["gym"]=gymnasium
+
 
 if __package__ is None or len(__package__)==0:
     from graph import Graph
     from games_list import GAMES_LIST
+    from functions_dataframe import is_dataframe,read_dataframe,write_dataframe
     from game_module_selector import get_game_default_env_class
     from core_game import GameAbstractCore
     from wrapper_gui import GuiWrapper
+    from wrapper_multi_action import MultiActionWrapper
     from wrapper_stream_agent import StreamWrapper
 else:
     from gridrl.graph import Graph
     from gridrl.games_list import GAMES_LIST
+    from gridrl.functions_dataframe import is_dataframe,read_dataframe,write_dataframe
     from gridrl.game_module_selector import get_game_default_env_class
     from gridrl.core_game import GameAbstractCore
     from gridrl.wrapper_gui import GuiWrapper
+    from gridrl.wrapper_multi_action import MultiActionWrapper
     from gridrl.wrapper_stream_agent import StreamWrapper
 
 ObsType=TypeVar("ObsType")
@@ -46,8 +53,11 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     no_warning()
 
-__all__=["GridRLAbstractEnv","deepcopy_env","ensure_env",
+__all__=["seed_everything","GridRLAbstractEnv","deepcopy_env","ensure_env",
     "make_env_class","make_env","validate_environment"]
+
+def seed_everything(seed)->None:
+    return
 
 class GridRLAbstractEnv(Env,GameAbstractCore):
     """Abstract GameCore gymnasium class for implementing Reinforcement Learning Agents environments."""
@@ -55,7 +65,7 @@ class GridRLAbstractEnv(Env,GameAbstractCore):
         """Constructor."""
         Env.__init__(self)
         GameAbstractCore.__init__(self)
-        self.env_id=0
+        self.env_initialized=False
         self.flat_obs=bool(config.get("flat_obs",False))
         self.auto_screen_obs=bool(config.get("auto_screen_obs",True))
         try:
@@ -79,7 +89,7 @@ class GridRLAbstractEnv(Env,GameAbstractCore):
     def post_init_binding(self)->None:
         """Binds the game data with the gym environment, after the game initialization."""
         return
-    def update_observation_spaces(self)->None:
+    def update_observation_spaces(self)->bool:
         """Updates the observation spaces depending on game and configs."""
         self.action_space=Discrete(self.all_actions_count)
         raw_obs_space_dict={}
@@ -88,15 +98,37 @@ class GridRLAbstractEnv(Env,GameAbstractCore):
             raw_obs_space_dict["screen"]=self.screen_observation_space
         else:
             self.screen_observation_space=None
-        raw_obs_space_dict.update(self.get_nonscreen_observation_space())
+        try:
+            raw_obs_space_dict.update(self.get_nonscreen_observation_space())
+        except AttributeError:
+            return False
         self.unflattened_observation_space=Dict(raw_obs_space_dict)
-        test_obs=self.get_observations()
+        try:
+            test_obs=self.get_observations()
+        except AttributeError:
+            return False
+        (max_bits,use_signed,use_float)=([8],False,False)
         for k,v in test_obs.items():
             if k not in raw_obs_space_dict:
                 raw_obs_space_dict[k]=Box(low=-127,high=128,shape=v.shape,dtype=v.dtype)
+            if isinstance(raw_obs_space_dict[k],(Discrete,MultiDiscrete,MultiBinary)):
+                continue
+            elif hasattr(raw_obs_space_dict[k],"dtype"):
+                try:
+                    dti=np.iinfo(raw_obs_space_dict[k].dtype)
+                    vmax=int(8*np.round(np.log2(dti.max+1)/8.))
+                    if dti.min<0:
+                        use_signed=True
+                except ValueError:
+                    dti=np.finfo(raw_obs_space_dict[k].dtype)
+                    vmax=int(np.finfo(raw_obs_space_dict[k].dtype).bits)
+                    use_signed=True
+                    use_float=True
+                max_bits.append(vmax)
+        self.flat_obs_dtype=np.dtype(f"{'float' if use_float else ('int' if use_signed else 'uint')}{np.max(max_bits):d}")
         try:
             test_obs=self.flatten_observations(test_obs)
-            dtype=dtype.shape if self.flat_obs_dtype is None else self.flat_obs_dtype
+            dtype=test_obs.dtype if self.flat_obs_dtype is None else self.flat_obs_dtype
             try:
                 obs_dti=np.iinfo(dtype)
             except ValueError:
@@ -108,15 +140,48 @@ class GridRLAbstractEnv(Env,GameAbstractCore):
                 if isinstance(v,Box):
                     flatten_dim+=np.prod(v.shape)
         self.flattened_observation_space=Box(low=low,high=high,shape=[flatten_dim],dtype=dtype)
+        self.flat_obs_dtype=dtype
         self.observation_space=self.flattened_observation_space if self.flat_obs else self.unflattened_observation_space
-        Env.__init__(self)
+        if not self.env_initialized:
+            Env.__init__(self)
+            self.env_initialized=True
+        return True
     def set_env_id(self,env_id:int)->None:
         """Set environment id for streaming purposes."""
         self.env_id=max(0,int(env_id))
     def flatten_observations(self,obs:Union[dict,np.ndarray])->np.ndarray:
         """Flatten the observations to a 1d ndarray."""
-        obs=np.hstack([obs[k].flatten() for k,_ in self.unflattened_observation_space.items()]) if isinstance(obs,dict) else obs.flatten()
-        return obs if self.flat_obs_dtype is None or obs.dtype==self.flat_obs_dtype else obs.astype(self.flat_obs_dtype)
+        obs=np.hstack([obs[k].flatten() if isinstance(obs[k],np.ndarray) else np.expand_dims(obs[k],axis=0) for k,_ in self.unflattened_observation_space.items()],dtype=self.flat_obs_dtype) if isinstance(obs,dict) else obs.flatten()
+        if self.flat_obs_dtype is not None and obs.dtype!=self.flat_obs_dtype:
+            obs=obs.astype(self.flat_obs_dtype)
+        return obs
+        #return obs if self.flat_obs_dtype is None or obs.dtype==self.flat_obs_dtype else obs.astype(self.flat_obs_dtype)
+    def unflatten_observations(self,obs:Union[dict,np.ndarray],expand_flat:bool=True,downcast:bool=True)->dict:
+        """Unflatten the observation to dict of ndarray with shape [batch,*obs_shape]."""
+        if isinstance(obs,dict):
+            return obs
+        unflattened={}
+        base_shape=list(obs.shape[:-1])
+        flat_pos=0
+        for k,s in self.unflattened_observation_space.items():
+            cur_shape=list(base_shape)
+            if hasattr(s,"shape") and (not expand_flat or len(s.shape)>0):
+                cur_shape.extend(s.shape)
+            else:
+                cur_shape.append(1)
+            cur_size=max(1,np.prod(s.shape))
+            unflattened[k]=obs[...,flat_pos:flat_pos+cur_size]
+            if len(cur_shape)>0:
+                unflattened[k]=unflattened[k].reshape(cur_shape)
+            if hasattr(s,"dtype"):
+                if unflattened[k].dtype!=s.dtype:
+                    unflattened[k]=unflattened[k].astype(s.dtype)
+            elif downcast:
+                pass#
+            if isinstance(unflattened[k],np.ndarray) and not unflattened[k].flags["C_CONTIGUOUS"]:
+                unflattened[k]=np.ascontiguousarray(unflattened[k])
+            flat_pos+=cur_size
+        return unflattened
     def step(self,action:ActType)->tuple[ObsType,SupportsFloat,bool,bool,dict[str,Any]]:
         """Run one timestep of the environment's dynamics using the agent actions."""
         self.step_game(action)
@@ -176,6 +241,110 @@ class GridRLAbstractEnv(Env,GameAbstractCore):
         except AttributeError:
             pass
         sys.exit(1)
+#######################
+### DATASET METHODS ###
+#######################
+    def run_ml_dataset(self,steps:int=16384,discard_uncompleted:bool=False):
+        """Run the environment for multiple steps and return stacked data in dataset format."""
+        (stack_obs,actions)=([],[])
+        for i in range(steps):
+            act=self.predict_action()
+            actions.append(act)
+            (obs,reward,done,truncated,info)=self.step_flatten_obs(act)
+            stack_obs.append(obs)
+            if done:
+                break
+        if len(stack_obs)==0 or (discard_uncompleted and not self.game_completed):
+            return (np.zeros((0,1),dtype=np.uint8,order="C"),np.zeros((0,),dtype=np.uint8,order="C"))
+        stack_obs=np.vstack(stack_obs,dtype=stack_obs[0].dtype)
+        actions=np.hstack(actions).astype(np.uint8)
+        return (stack_obs,actions)
+    def run_multiple_ml_dataset(self,runs:int,steps:int=16384,discard_uncompleted:bool=False):
+        """Run multiple indipendent runs and return data in dataset format."""
+        (stack_obs,actions,run_sizes)=([],[],[])
+        for rep in range(runs):
+            self.reset()
+            (cur_stack_obs,cur_actions)=self.run_ml_dataset(steps,discard_uncompleted)
+            if len(cur_actions)>0:
+                stack_obs.append(cur_stack_obs)
+                actions.append(cur_actions)
+                run_sizes.append(len(cur_actions))
+        if len(stack_obs)==0:
+            return (np.zeros((0,1),dtype=np.uint8,order="C"),
+                np.zeros((0,),dtype=np.uint8,order="C"),
+                np.zeros((0,),dtype=np.uint32,order="C"))
+        stack_obs=np.vstack(stack_obs,dtype=stack_obs[0].dtype)
+        actions=np.hstack(actions,dtype=np.uint8)
+        run_sizes=np.hstack(run_sizes).astype(dtype=np.uint32)
+        return (stack_obs,actions,run_sizes)
+    def get_obs_dataframe_columns_and_dtypes(self,default_dtype:Union[np.dtype,None]=None)->tuple[np.ndarray,np.ndarray]:
+        """Get observation column names and dtypes."""
+        (columns,dtypes)=([],[])
+        for k,s in self.unflattened_observation_space.items():
+            cur_shape=[]
+            if hasattr(s,"shape") and len(s.shape)>0:
+                cur_shape.extend(s.shape)
+            else:
+                cur_shape.append(1)
+            cur_size=max(1,np.prod(s.shape))
+            dtypes.extend([s.dtype if hasattr(s,"dtype") else (self.flat_obs_dtype if default_dtype is None else default_dtype)]*cur_size)
+            for i in range(cur_size):
+                columns.append(f"obs|{k}_f{i:d}")
+        return (columns,dtypes)
+    def convert_ml_dataset_to_dataframe(self,stack_obs:np.ndarray,actions:np.ndarray,
+        run_sizes:np.ndarray,df_process_func:Union[Callable,None]=None
+    )->pd.DataFrame:
+        """Convert from dataset format to dataframe."""
+        (columns,dtypes)=self.get_obs_dataframe_columns_and_dtypes(stack_obs.dtype)
+        df=pd.DataFrame(stack_obs,columns=columns,dtype=stack_obs.dtype)
+        #for col,dtype in zip(df.columns,dtypes):
+        #    df[col]=df[col].astype(dtype)
+        df["info|step_id"]=np.hstack([np.arange(k,dtype=np.uint32) for k in run_sizes])
+        df["info|run_id"]=((df["info|step_id"]==0).cumsum()-1).clip(0,None)
+        df["agent|action"]=actions
+        df["env|reward"]=0.
+        if callable(df_process_func):
+            df=df_process_func(df)
+        return df
+    def build_and_save_runs_dataframe(self,filename:str,runs:int,steps:int=16384,
+        discard_uncompleted:bool=False,df_process_func:Union[Callable,None]=None
+    )->pd.DataFrame:
+        """Run multiple indipendent runs and save the result in dataframe format."""
+        df=self.convert_ml_dataset_to_dataframe(*self.run_multiple_ml_dataset(runs,steps,discard_uncompleted),df_process_func)
+        write_dataframe(df,filename)
+#        for k in df.columns:print(k)
+        #print(df[["agent|action","info|run_id","info|step_id"]].to_string())
+        #for k,v in stack_obs.items():
+        #    print(k,v.shape)
+        return df
+    def load_dataframe(self,filename:str)->pd.DataFrame:
+        """Load a generic dataframe from file."""
+        return read_dataframe(filename)
+    def load_dataset(self,filename_or_df:Union[str,pd.DataFrame],unflatten:bool=True
+    )->tuple[np.ndarray,np.ndarray,np.ndarray]:
+        """Load an environment result dataframe from file."""
+        df=filename_or_df if is_dataframe(filename_or_df) else self.load_dataframe(filename_or_df)
+        all_columns=set(df.columns)
+        (obs_columns,obs_dtypes)=self.get_obs_dataframe_columns_and_dtypes()
+        obs_columns=[k for k in obs_columns if k in df.columns]
+        all_columns-=set(obs_columns)
+        all_columns-=set(["info|run_id","info|step_id","agent|action"])
+        all_columns=sorted(all_columns)
+        extra_obs_columns=[k for k in all_columns if k.endswith("_f0")]
+        stack_obs=df[obs_columns].values
+        actions=df["agent|action"].values
+        run_sizes=df.groupby("info|run_id")["info|step_id"].apply(np.max)+1
+        if unflatten:
+            stack_obs=self.unflatten_observations(stack_obs)
+        if not unflatten and len(extra_obs_columns)>0:
+            extra_obs={}
+            for k in extra_obs_columns:
+                pass
+                #extra_obs[k]=df[all_columns].values
+        else:
+            extra_obs=df[all_columns].values
+        del df
+        return (stack_obs,actions,run_sizes,extra_obs)
 
 def deepcopy_env(env:GridRLAbstractEnv)->GridRLAbstractEnv:
     """Deepcopy of the environment, avoiding pickle fails due to module objects."""
@@ -187,6 +356,13 @@ def ensure_env(env:Union[str,callable,GridRLAbstractEnv],
     """Utility function to ensure an environment regardless the input type."""
     if isinstance(env,str):
         return get_game_default_env_class(env)(*args,**kwargs)
+    if isinstance(env,int):
+        try:
+            if len(GAMES_LIST)>env>=0:
+                env=GAMES_LIST[env]
+        except (ValueError,TypeError):
+            env=""
+        return ensure_env(env,copy,*args,**kwargs)
     if env.__class__.__name__=="type":
         return env(*args,**kwargs)
     if copy:
@@ -219,20 +395,25 @@ def make_env(env_class:GridRLAbstractEnv,rank:int=0,env_config:Union[dict,None]=
     def _init()->GridRLAbstractEnv:
         config=dict(env_config)
         config["env_id"]=rank
+        multistep_keys=["use_multistep","action_multi_max_directional_movements",
+            "action_multi_angular","action_multi_enable_axis_order",
+            "action_multi_non_directional_actions_count","action_multi_reward_method"]
+        temp_multistep_data={k:int(config[k]) if k.endswith("_id") else config[k] for k in multistep_keys if len(str(config.get(k,"")))>0}
+        if len(temp_multistep_data)>1:
+            config["action_nop"]=True
         env=ensure_env(env_class,copy=False,config=config)
         from_gui=bool(config.get("gui",0))>0
         if not from_gui:
             if agent_class is not None and hasattr(env,"set_agent") and callable(env.set_agent):
                 env.set_agent(agent_class(env,**agent_args))
-        temp_stream_metadata={}
+        env.reset(seed=seed+rank)
+        if not from_gui and len(temp_multistep_data)>1:
+            env=MultiActionWrapper(env,temp_multistep_data)
         metadata_keys=["local_stream","stream","user","env_id","sprite_id","color","extra",
             "stream_url","upload_interval"]
-        for k in config.get("stream_metadata",{}).items():
-            temp_stream_metadata[k]=config[k]
-        for k in metadata_keys:
-            if len(str(config.get(k,"")))>0:
-                temp_stream_metadata[k]=int(config[k]) if k.endswith("_id") else config[k]
-        env.reset(seed=seed+rank)
+        temp_stream_metadata={k:v for k,v in config.get("stream_metadata",{}).items() if k in metadata_keys}
+        temp_stream_metadata.update({k:int(config[k]) if k.endswith("_id") else config[k]
+            for k in metadata_keys if len(str(config.get(k,"")))>0})
         if (len(temp_stream_metadata)>2 or "stream" in temp_stream_metadata
             or "local_stream" in temp_stream_metadata
         ):
@@ -242,7 +423,8 @@ def make_env(env_class:GridRLAbstractEnv,rank:int=0,env_config:Union[dict,None]=
             stream_url=used_stream_metadata["stream_url"]
             upload_interval=used_stream_metadata["upload_interval"]
             for k in ["stream","stream_url","upload_interval"]:
-                del used_stream_metadata[k]
+                if k in used_stream_metadata:
+                    del used_stream_metadata[k]
             env=StreamWrapper(env,stream_metadata=used_stream_metadata,
                 stream_url=stream_url,upload_interval=upload_interval)
         if from_gui:

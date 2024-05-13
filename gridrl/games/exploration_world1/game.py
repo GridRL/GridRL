@@ -39,9 +39,10 @@ __all__=["ExplorationWorld1Game"]
 class ExplorationWorld1Game(ExplorationAbstractGame):
     """The main implementation of the game exploration_world1."""
     def __init__(self,
-        config:dict={},
+        config:Union[dict,None]=None,
         agent_class:Union[Any,None]=None,
-        agent_args:dict={},*args,**kwargs
+        agent_args:Union[dict,None]=None,
+        *args,**kwargs
     )->None:
         """Constructor."""
         game_name="exploration_world1"

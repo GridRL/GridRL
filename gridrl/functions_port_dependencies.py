@@ -8,6 +8,8 @@ import numpy as np
 from numpy.lib.stride_tricks import as_strided
 sys.dont_write_bytecode=True
 
+#__all__=[]
+
 (HAS_MODULE_SKIMAGE,HAS_MODULE_MATPLOTLIB,HAS_MODULE_KERAS)=(False,False,False)
 
 #try:

@@ -141,12 +141,12 @@ Compatibility
 
 Games
 * Complete exploration_world1 main progress (currently at 60%)
-* Complete creatures_world1 main progress (halted before 40%)
+* Complete creatures_world1 main progress (main-story simplified but done, completion: 60%)
 * ~~Add abstractions for menu handling~~
 * Add abstractions and better data structure for creatures_world1 battle system
 * ~~Menu rendering~~
 * Set Teleport powerup to be accessible only in menu mode (too disruptive otherwise)
-* Set an extra frame for warps transitions
+* ~~Set an extra frame for warps transitions~~
 * More games archetypes
 
 Core speedup
@@ -155,16 +155,16 @@ Core speedup
 * Port relevant game sections to Cython
 
 Environment
-* Multi-action wrappers
+* ~~Multi-action wrappers~~ (partially implemented, untested)
 * Partial state randomization or perturbation
 * Improve environment validation for custom games
 * Scripting for custom NPC suggesting informative data like coordinates or text
 * Random dummy NPC generation
-* ~~Direct text interactions. Data provided as raw string and partially encoded on the screen.~~
-* Boilerplate routines for dataset generation, used for offline-learning
+* ~~Direct text interactions. Data provided as raw string and partially encoded on the screen~~
+* ~~Boilerplate routines for dataset generation, used for offline-learning~~
 
 Deterministic agents
-* Generic pathfinder boilerplate
+* ~~Generic pathfinder boilerplate~~ (can be improved)
 * Build more fixed algorithm on a per-game basis
 
 Customization

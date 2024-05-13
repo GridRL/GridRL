@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Basic agents implementations."""
+"""Random agents implementations."""
 
 import sys
 import numpy as np
@@ -15,6 +15,9 @@ else:
     from gridrl.core_environment import GridRLAbstractEnv
     from gridrl.agents_base import AgentBase
 
+__all__=["normalize_sum_one",
+    "AgentRandom","AgentRandomOffsets","AgentRandomChaseWarps"]
+
 def normalize_sum_one(nums:np.ndarray)->np.ndarray:
     """Normalize ndarray to sum to 1 on last axis."""
     return np.divide(nums,np.expand_dims(np.sum(nums,axis=-1),axis=-1))
@@ -28,14 +31,14 @@ class AgentRandom(AgentBase):
     def run_roll(self,roll_steps:int,early_stopping:bool=False)->np.ndarray:
         """Run the step roll."""
         self.pre_roll_initialize()
-        actions=np.full((roll_steps,),self.env.action_nop_id,dtype=np.int16,order="C")
+        actions=np.full((roll_steps,),self.game_env.action_nop_id,dtype=np.int16,order="C")
         prev_act=0
         i=0
-        for i,(act,stick) in enumerate(zip(self.env.roll_random_actions_without_nop(roll_steps),
+        for i,(act,stick) in enumerate(zip(self.game_env.roll_random_actions_without_nop(roll_steps),
             np.ones((roll_steps,),dtype=np.float32,order="C") if self.sticky_freq<1e-6 else np.random.rand(roll_steps))):
-            if stick<self.sticky_freq and act<self.env.movement_max_actions:
-                act=prev_act if self.env.movement_max_actions==4 else 0
-            data=self.env.step(act)
+            if stick<self.sticky_freq and act<self.game_env.movement_max_actions:
+                act=prev_act if self.game_env.movement_max_actions==4 else 0
+            data=self.game_env.step(act)
             actions[i]=act
             if data[2] or (early_stopping and self.check_early_stopping()):
                 break
@@ -53,20 +56,20 @@ class AgentRandomOffsets(AgentBase):
         if len(self.scheduled_actions)>0:
             return self.pop_last_scheduled_action()
         for i in range(64):
-            target=self.env.roll_random_screen_offsets(1)[0]
-            coords=self.env.game_state["player_coordinates_data"][1:3].copy()+target
-            sizes=self.env.get_cached_map_sizes(self.env.game_state["player_coordinates_data"][0])
+            target=self.game_env.roll_random_screen_offsets(1)[0]
+            coords=self.game_env.game_state["player_coordinates_data"][1:3].copy()+target
+            sizes=self.game_env.get_cached_map_sizes(self.game_env.game_state["player_coordinates_data"][0])
             if sizes[0]>coords[0]>=0 and sizes[1]>coords[1]>=0 and not np.array_equal(target,[0,0]):
-#            if nb_is_point_inside_area(*coords,0,0,*self.env.get_cached_map_sizes(self.env.game_state["player_coordinates_data"][0])) and not np.array_equal(target,[0,0]):
+#            if nb_is_point_inside_area(*coords,0,0,*self.game_env.get_cached_map_sizes(self.game_env.game_state["player_coordinates_data"][0])) and not np.array_equal(target,[0,0]):
                 break
         offs=np.clip(target,-1,1)
-        max_travel=np.abs(target).clip(0,np.abs(self.env.player_screen_bounds).max())
+        max_travel=np.abs(target).clip(0,np.abs(self.game_env.player_screen_bounds).max())
         actions=[]
         self.axis_priority^=1
         for i in [0,1][slice(None,None,None if self.axis_priority==0 else -1)]:
             toffs=offs.copy()
             toffs[i^1]=0
-            actions+=[self.env.get_action_from_direction_offsets_4way(*toffs) for i in range(np.abs(max_travel[i]))]
+            actions+=[self.game_env.get_action_from_direction_offsets_4way(*toffs) for i in range(np.abs(max_travel[i]))]
         #if np.random.shuffle(actions)
 ### TO-DO: ADD FINAL DIRECTION FOR CONSISTENCY WITH 2-3 WAY INPUT DIRECTIONS
         self.set_scheduled_actions(actions)
@@ -83,9 +86,9 @@ class AgentRandomChaseWarps(AgentBase):
         if len(self.scheduled_actions)>0:
             return self.pop_last_scheduled_action()
         if np.random.rand()<self.chase_freq:
-            map_warps=self.env.get_cached_map_warps(self.env.game_state["player_coordinates_data"][0])
+            map_warps=self.game_env.get_cached_map_warps(self.game_env.game_state["player_coordinates_data"][0])
             if len(map_warps)>0:
-                warp_offs=np.array([w[:2]-self.env.game_state["player_coordinates_data"][1:3] for w in map_warps])
+                warp_offs=np.array([w[:2]-self.game_env.game_state["player_coordinates_data"][1:3] for w in map_warps])
                 distances_metric=1+np.power((np.sum(np.abs(warp_offs),axis=1)-1).clip(0),2)
                 distances_metric[distances_metric>64]=0xFFF
                 probs=normalize_sum_one(1./distances_metric)
@@ -96,7 +99,7 @@ class AgentRandomChaseWarps(AgentBase):
                 for i in range(2):
                     toffs=offs.copy()
                     toffs[i^1]=0
-                    actions+=[self.env.get_action_from_direction_offsets_4way(*toffs) for i in range(np.abs(max_travel[i]))]
+                    actions+=[self.game_env.get_action_from_direction_offsets_4way(*toffs) for i in range(np.abs(max_travel[i]))]
                 np.random.shuffle(actions)
                 self.set_scheduled_actions(actions)
                 if len(self.scheduled_actions)>0:

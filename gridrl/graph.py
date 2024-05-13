@@ -8,6 +8,8 @@ import sys
 import numpy as np
 sys.dont_write_bytecode=True
 
+__all__=["Graph"]
+
 class Graph:
     """Graph class implementation."""
     def __init__(self,nodes:Union[dict,None]=None)->None:

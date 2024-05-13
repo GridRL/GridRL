@@ -10,6 +10,7 @@ from gridrl.envs import CreaturesWorld1Env
 
 sys.dont_write_bytecode = True
 
+#__all__=[]
 
 class ExplorationWorld1ExampleEnv(CreaturesWorld1Env):
     """Custom subclass of an existing game environment."""

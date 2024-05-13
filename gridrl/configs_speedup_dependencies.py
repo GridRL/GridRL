@@ -8,6 +8,8 @@ import sys
 #import os
 sys.dont_write_bytecode=True
 
+#__all__=[]
+
 SPEEDUP_CACHE=True
 SPEEDUP_CYTHON=False
 SPEEDUP_JAX=False

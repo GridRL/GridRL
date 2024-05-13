@@ -3,7 +3,7 @@
 """GameCore core implementation."""
 
 from typing import Union,Any
-from collections import deque,OrderedDict
+from collections import deque,OrderedDict#,Counter
 from copy import deepcopy
 import warnings
 import struct
@@ -11,6 +11,7 @@ import sys
 import time
 from io import BytesIO
 import numpy as np
+
 sys.dont_write_bytecode=True
 warnings.filterwarnings("ignore",category=DeprecationWarning)
 
@@ -21,7 +22,8 @@ if __package__ is None or len(__package__)==0:
     from functions_port_dependencies import rgb_to_hsv,hsv_to_rgb,downscale_local_mean,to_categorical
 #    from functions_numba import initialize_numba_functions,nb_is_point_inside_area#,nb_in_array_uint8,nb_assign_uint8_2d,nb_assign_int16,nb_assign_int16_2d,nb_sum_int16
     from game_module_selector import GameModuleSelector
-    from core_constants import (shrinked_characters_list,
+    from core_constants import (tiles_shrinked_id_list,
+        shrinked_characters_list,
         no_map_tile_id,unwalkable_tile_id,walk_tile_id,
         warp_tile_id,
         ledge_down_tile_id,ledge_left_tile_id,ledge_right_tile_id,ledge_up_tile_id,
@@ -45,7 +47,8 @@ else:
     from gridrl.functions_port_dependencies import rgb_to_hsv,hsv_to_rgb,downscale_local_mean,to_categorical
 #    from gridrl.functions_numba import initialize_numba_functions,nb_is_point_inside_area#,nb_in_array_uint8,nb_assign_uint8_2d,nb_assign_int16,nb_sum_int16
     from gridrl.game_module_selector import GameModuleSelector
-    from gridrl.core_constants import (shrinked_characters_list,
+    from gridrl.core_constants import (tiles_shrinked_id_list,
+        shrinked_characters_list,
         no_map_tile_id,unwalkable_tile_id,walk_tile_id,
         warp_tile_id,
         ledge_down_tile_id,ledge_left_tile_id,ledge_right_tile_id,ledge_up_tile_id,
@@ -69,7 +72,12 @@ class GameAbstractCore:
     """The abstract GameCore class used for Environment subclassing."""
     has_encoded_assets=False
     def __init__(self):
+        self.env_id=0
+        self.ui_input_allowed=True
         self.movement_max_actions=4
+        self.non_powerup_actions_count=4
+        self.allowed_actions_count=4
+        self.action_nop_id=0
         self.all_actions_count=4
         self.screen_observation_type=0
         self.auto_screen_obs=True
@@ -174,6 +182,7 @@ class GameCore(GameAbstractCore):
         self.starting_event=config.get("starting_event","")
         self.starting_collected_flags=config.get("starting_collected_flags",[])
         self.strip_ledges=bool(config.get("strip_ledges",False))
+        self.two_step_warp=bool(config.get("two_step_warp",True))
         self.movement_max_actions=max(4,min(2,int(config.get("movement_max_actions",4))))
         self.bypass_powerup_actions=bool(config.get("bypass_powerup_actions",False))
         self.button_interaction=bool(config.get("button_reward",False))
@@ -274,8 +283,8 @@ class GameCore(GameAbstractCore):
         self.global_map=fill_pad_image(self.global_map,*self.global_map_padding,reserve_first_channels=True,fill_value=no_map_tile_id)
         self.call_direct_script("script_core_set_start_positions")
         self.last_checkpoint_place=self.first_checkpoint_place.copy()
-        #self.no_assets=True
         should_load_gfx=not self.no_assets and (self.use_gfx_image or self.from_gui) and "global_starting_coords" in self.game_data
+        self.tile_id_shrinked_lookup=np.array(tiles_shrinked_id_list,dtype=np.uint8,order="C")
         self.tile_id_colors_lookup=np.array(tile_id_colors_list,dtype=np.uint8,order="C")
         self.global_map_gfx=self.game_selector.fallback_read_map_png() if should_load_gfx else np.zeros((16,16,3),dtype=np.uint8,order="C")
         self.sprites_gfx=self.game_selector.fallback_read_sprites_png() if should_load_gfx else np.zeros((16,16,3),dtype=np.uint8,order="C")
@@ -325,12 +334,15 @@ class GameCore(GameAbstractCore):
             extra_action_space+=1
             if self.true_menu:
                 extra_action_space+=3
-            elif not self.bypass_powerup_actions:
-                extra_action_space+=defined_actions_powerups_ids_count
+        self.non_powerup_actions_count=self.movement_max_actions+extra_action_space
+        self.allowed_actions_count=self.non_powerup_actions_count
+        if self.button_interaction and not self.bypass_powerup_actions:
+            extra_action_space+=defined_actions_powerups_ids_count
+            self.allowed_actions_count=self.movement_max_actions+extra_action_space
+        self.all_actions_count=self.movement_max_actions+extra_action_space
         self.secondary_action_value=0
         self.forced_directional_movements=[]
         self.reward_range=(0,15000)
-        self.all_actions_count=self.movement_max_actions+extra_action_space
         screen_channels_list=[] if grayscale_screen else [3]
         if self.screen_observation_type==0:
             (self.screen_box_high,self.screen_box_shape)=(1,(1,1))
@@ -363,6 +375,7 @@ class GameCore(GameAbstractCore):
         self.reset_event_flags(False)
         self.infinite_game=bool(config.get("infinite_game",False))
         self.sandbox=bool(config.get("sandbox",False))
+        self.unlock_teleport_locations=bool(config.get("unlock_teleport_locations",False))
         self.define_game_config(config)
         self.history_tracking={
             "visited_maps":np.zeros_like(self.global_map,dtype=np.uint8,order="C"),
@@ -371,6 +384,8 @@ class GameCore(GameAbstractCore):
         self.game_state={
             "player_coordinates_data":np.zeros((11,),np.int16,order="C"),
             "last_suggested_coordinates":np.zeros((4,),np.int16,order="C"),
+            "pending_warp_state":0,
+            "pending_warp_data":np.zeros((4,),np.int16,order="C"),
             "previous_map_id":self.first_checkpoint_place[0],
             "powerup_walk_tile":0,"powerup_screen_remove_tile":0,"powerup_screen_fix_tile":0,"powerup_started":0,
             "player_level":0,"loss_count":0,"pseudo_seed":0,
@@ -588,14 +603,18 @@ class GameCore(GameAbstractCore):
                 mask=np.repeat(np.expand_dims(np.hstack([
                     np.isin(np.arange(warps_count,dtype=np.uint16),invalid_warps),
                     np.ones(map_warps.shape[0]-warps_count,dtype=bool)
-                ],dtype=bool),axis=1),map_warps.shape[1],axis=1)
-                self.game_data["warps"][map_id][:]=np.pad(map_warps[~mask],(0,mask.sum()),constant_values=0).reshape(mask.shape)
+                ],dtype=bool),axis=1),5,axis=1)
+                self.game_data["warps"][map_id][:,:5]=np.pad(map_warps[~mask],(0,mask.sum()),constant_values=0).reshape(mask.shape)
             warps_count-=len(invalid_warps)
             try:
                 self.game_data["warps_count"][map_id]=warps_count
                 self.game_data["warps"][map_id][warps_count:]=0
             except (KeyError,IndexError):
                 pass
+        if self.game_data["warps"].shape[2]<10:
+            self.game_data["warps"]=np.tile(self.game_data["warps"][:,:,:5],2)
+        else:
+            self.game_data["warps"][:,:,5:10]=self.game_data["warps"][:,:,:5]
     def fix_npc_game_data(self)->None:
         """Fix npcs game_data parameters for possible inconsistencies. Doesn't fix critical errors."""
         #if not self.skip_validation:
@@ -755,6 +774,12 @@ class GameCore(GameAbstractCore):
         """Extra text printed in gui mode for debug purposes."""
         return ""
 ###############
+### UI INFO ###
+###############
+    def get_ui_step_delay(self)->int:
+        """Return the time waited before rendering the next step."""
+        return 50
+###############
 ### SEEDING ###
 ###############
     def set_game_seed(self,seed:Union[int,None]=None)->None:
@@ -800,7 +825,7 @@ class GameCore(GameAbstractCore):
     @lru_cache_func(maxsize=2048)
     def get_cached_map_warps(self,map_id:int)->np.ndarray:
         """Return map warps."""
-        return self.game_data["warps"][map_id][:self.game_data["warps_count"][map_id]] if "warps" in self.game_data else self.game_data["objects"][map_id]["warps"]
+        return self.game_data["warps"][map_id,:self.game_data["warps_count"][map_id],-5:] if "warps" in self.game_data else self.game_data["objects"][map_id]["warps"]
     @lru_cache_func(maxsize=2048)
     def get_cached_map_npcs(self,map_id:int)->np.ndarray:
         """Return map NPC."""
@@ -867,6 +892,9 @@ class GameCore(GameAbstractCore):
             if direction==act_dir:
                 return action
         return 0
+    def get_action_from_direction(self,direction:int)->int:
+        """Convert a direction into an action, considering the current direction."""
+        return self.get_action_from_direction_offsets_4way(*self.get_direction_offset(direction))
     @lru_cache_func(maxsize=5)
     def get_action_offset(self,movement:int)->np.ndarray:
         """Convert an action info [y,x] offset from player position."""
@@ -1125,6 +1153,20 @@ class GameCore(GameAbstractCore):
         coords=self.get_legacy_global_map_coords(map_id,*self.get_faced_direction_coordinates(y,x,direction))
         old_tile=self.global_map[channel,coords[0],coords[1]]
         global_pos_fallback=True
+        if tile_id==old_reward_tile_id:
+            #ntiles_data=[]
+            #for off in self.directions_offsets[:4]:
+            #    ncoords=coords+off
+            #    ntile=self.global_map[channel,ncoords[0],ncoords[1]]
+            #    nskip=ntile in {active_script_tile_id,active_script_tile_id,old_reward_tile_id,old_script_tile_id,warp_tile_id}
+            #    if not nskip:
+            #        ntiles_data.append(ntile)
+            #        nwalk=self.is_walkable_tile_id(ntile)
+            #if len(ntiles_data)==0:
+            #    ntiles_data.append(walk_tile_id)
+            #ntiles_data=sorted([[ntile,count,self.is_walkable_tile_id(ntile)] for ntile,count in Counter(ntiles_data).items()],key=lambda x:(-x[1],x[2]))
+            #tile_id=ntiles_data[0][0]
+            tile_id=walk_tile_id
         if check_npc:
             # and old_tile in [npc_down_tile_id,npc_left_tile_id,npc_right_tile_id,npc_up_tile_id]:
             lcoords=np.array([y,x],dtype=np.int16)+self.get_direction_offset(direction)
@@ -1174,10 +1216,12 @@ class GameCore(GameAbstractCore):
                 self.global_map[self.game_data["channels"][map_id],cur_map_start[0]:cur_map_start[0]+cur_map_dims[0],cur_map_start[1]:cur_map_start[1]+cur_map_dims[1]]=new_map
             else:
                 self.global_map[self.game_data["channels"][map_id],cur_map_start[0]:cur_map_start[0]+cur_map_dims[0],cur_map_start[1]:cur_map_start[1]+cur_map_dims[1]]=self.game_data["maps"][map_id]
-    def reindex_current_map_warps(self,map_id:int)->None:
-        """Change temporarily all map warps of a given map id. It can be used for elevators."""
-### TO IMPLEMENT
-### FUNCTION TO EDIT MAP WARPS TO NEW LOCATION. IT MAY NEED RECACHING THE DATA. UNKNOWN DEFAULT VALUES
+    def reindex_current_map_warps(self,warps_data:list)->None:
+        """Change map warps values, used for elevators. Data format is [[warp_id,map,y,x]]."""
+        for wd in warps_data:
+            if len(wd)>1:
+                widx=min(0,-4+len(wd))
+                self.game_data["warps"][self.game_state["player_coordinates_data"][0],wd[0],slice(-3,None if widx>=0 else widx)]=wd[1:4]
         self.clear_single_lru_cache("get_cached_map_warps")
     def apply_global_scripting_tiles(self,map_changed:bool=False)->None:
         """Transfer particular tiles to all maps. Used internally."""
@@ -1255,7 +1299,7 @@ class GameCore(GameAbstractCore):
     def clear_events_caches(self)->bool:
         """Clear cache decorators of event-related functions."""
         ret=True
-        for k in ["get_event_flag","get_event_flags_sum"]:
+        for k in ["get_event_flag","get_event_flags_sum","get_current_max_action_space"]:
             if not self.clear_single_lru_cache(k):
                 ret=False
         return ret
@@ -1292,14 +1336,17 @@ class GameCore(GameAbstractCore):
         if len(self.trigger_done_event_name)>0 and name==self.trigger_done_event_name:
             self.game_completed=True
         return True
-    def activate_event_reward_flag(self,name:str,use_script_positions:bool=False)->bool:
+    def activate_event_reward_flag(self,name:str,use_script_positions:bool=False,trigger_agent:bool=True)->bool:
         """Set an event flag to 1 and update tiles or NPC states."""
         if name not in self.event_rewards_data or self.get_event_flag(name)>0:
             return False
         self.activate_event_flag(name)
         if not self.using_npcs:
+            #self.collect_most_common_walkable_nearby_tile()
             self.change_global_map_tile_from_faced_local_coords(*self.event_rewards_data[name][0][:4],old_reward_tile_id,True)
         self.hook_after_event(name,self.event_rewards_data[name],use_script_positions)
+        if trigger_agent and self.has_agent():
+            self.agent.hook_activated_event_flag(name)
         return True
     def get_active_flags_names(self)->list[str]:
         """Gets the name of all active flags."""
@@ -1658,7 +1705,7 @@ class GameCore(GameAbstractCore):
     def get_map_minimal_screen(self,from_history:bool=False,pad:int=1,relative:bool=False)->np.ndarray:
         """Return a view of the minimal screen."""
         if relative:
-            return self.get_monocromatic_agent_screen()
+            return self.game_state["game_minimal_screen"]
         cur_map_id=self.game_state["player_coordinates_data"][0]
         bounds=self.get_cached_global_map_bounds(cur_map_id)
         return (self.history_tracking["visited_maps"] if from_history else self.global_map)[self.get_cached_global_map_channel(cur_map_id),bounds[0]-pad:bounds[2]+pad,bounds[1]-pad:bounds[3]+pad]
@@ -1677,7 +1724,7 @@ class GameCore(GameAbstractCore):
         if speedup<1:
             used_speedup=1 if len(self.gif_frames)<200 else 4
         else:
-            used_speedup=int(used_speedup)
+            used_speedup=int(speedup)
         for _ in range((4*used_speedup)-1):
             self.add_gif_frame()
         ret=generate_gif_from_numpy(self.gif_frames,outfile_or_buff,return_buff,1000*24/60./used_speedup,loop)
@@ -1687,7 +1734,7 @@ class GameCore(GameAbstractCore):
     def save_run_gif(self,delete_old:bool=True)->None:
         """User-friendly gif-save function."""
         if self.log_screen:
-            self.save_gif(f"{self.game_selector.selected_base_dir}run_t{int(time.time()):d}.gif",delete_old=delete_old,speedup=self.gif_speedup)
+            self.save_gif(f"{self.game_selector.selected_base_dir}run_t{int(time.time()):d}_e{self.env_id:d}.gif",delete_old=delete_old,speedup=self.gif_speedup)
 ##################
 ### DEBUG TEXT ###
 ##################
@@ -1741,11 +1788,11 @@ class GameCore(GameAbstractCore):
             extra_txt+=(f"\tInteractions:\t[{self.action_interact_id+1}] Interact - [{self.action_back_id+1}] Back"
                 f"- [{self.action_menu_id+1}] Menu - [{self.action_extra_id+1}] Extra\n")
         elif self.button_interaction:
-            extra_txt+=f"\tInteractions:\t[{self.action_interact_id+1}]\n"
+            extra_txt+=f"\tInteractions:\t[{self.action_interact_id+1}] Interact\n"
             if self.bypass_powerup_actions:
                 extra_txt+="!!!\tPowerup-actions are bypassed by interacting !!!\n"
             else:
-                extra_txt+=f"\tPowerup-acts:\t[{', '.join([self.get_powerup_button_text(self.action_interact_id+2+i,False) for i,(_,_) in enumerate(self.event_rewards_powerups.items())])}]\n"
+                extra_txt+=f"\tPowerup-acts:\t[{', '.join([self.get_powerup_button_text(self.non_powerup_actions_count+1+i,False) for i,(_,_) in enumerate(self.event_rewards_powerups.items())])}]\n"
         txt=f"\n{'='*32}\n\tDirections:\t{dir_txt}\n{extra_txt}{self.get_game_commands_text()}\n\tActions internal indexing starts at (0), GUI buttons at [1].\n{'='*32}"
         return txt
 ####################
@@ -1786,12 +1833,14 @@ class GameCore(GameAbstractCore):
             np.hstack([np.where(v.clip(0,1)>0,2,0).astype(np.uint8) for v in self.history_tracking["steps_on_map"]],dtype=np.uint8)
         ],dtype=np.uint8),self.tile_id_colors_lookup)
         show_image(img,title=self.get_coordinates_text())
-    def show_last_gif_frames(self,frames:int=5)->None:
+    def show_last_gif_frames(self,frames:int=5,reset:bool=False)->None:
         """Show the last saved gif frames."""
         if len(self.gif_frames)>0:
-            show_image(np.hstack(self.gif_frames[-frames:],dtype=np.uint8),f"Step: {self.step_count:d}")
+            show_image(np.hstack(self.gif_frames[-frames:],dtype=np.uint8),f"Step: {self.step_count:d} - {self.get_debug_text()}")
         else:
             self.show_agent_screen()
+        if reset:
+            self.reset_gif_frames()
 ##########################
 ### WARP DATA CHAINING ###
 ##########################
@@ -1802,19 +1851,19 @@ class GameCore(GameAbstractCore):
             return [np.array([map_id,y,x],dtype=np.int16)]
         for w1 in self.get_cached_map_warps(map_id):
             if self.get_cached_global_map_channel(w1[2])==channel:
-                warps.append(w1[-3:])
+                warps.append(w1[2:5])
             else:
                 for w2 in self.get_cached_map_warps(w1[2]):
                     if self.get_cached_global_map_channel(w2[2])==channel:
-                        warps.append(w2[-3:])
+                        warps.append(w2[2:5])
                     else:
                         for w3 in self.get_cached_map_warps(w2[2]):
                             if self.get_cached_global_map_channel(w3[2])==channel:
-                                warps.append(w3[-3:])
+                                warps.append(w3[2:5])
                             else:
                                 continue
 #                               for w4 in self.get_cached_map_warps(w3[2]):
-#                                   if self.get_cached_global_map_channel(w4[2])==channel:warps.append(w4[-3:])
+#                                   if self.get_cached_global_map_channel(w4[2])==channel:warps.append(w4[2:5])
         return warps
     def get_nearest_channel_warp_from_player(self,channel:int,map_id:int,y:int,x:int)->list:
         """Return data relative to the nearest warp from the player at the given channel."""
@@ -1876,8 +1925,8 @@ class GameCore(GameAbstractCore):
     def core_hook_after_warp(self)->None:
         """Executed after exiting a warp."""
         self.npcs_map_tiles_update(self.game_state["player_coordinates_data"][0],True)
-        if self.game_state["player_coordinates_data"][0] not in self.teleport_data and self.game_state["player_coordinates_data"][0] in self.game_data["teleport_data"]:
-            self.teleport_data[self.game_state["player_coordinates_data"][0]]=self.game_data["maps"][self.game_state["player_coordinates_data"][0]][0]
+        if self.game_state["player_coordinates_data"][0] not in self.teleport_data:
+            self.add_teleport_data(self.game_state["player_coordinates_data"][0])
         self.reset_forced_directional_movements()
         if self.has_agent():
             self.agent.reset_scheduled_actions()
@@ -1893,7 +1942,7 @@ class GameCore(GameAbstractCore):
             return False
         for ek,ed in self.event_rewards_data_by_map.get(self.game_state["player_coordinates_data"][0],{}).items():
             if self.get_event_flag(ek)==0 and self.game_state["player_coordinates_data"][0]==ed[0][0] and len([1 for rk in ed[3] if self.get_event_flag(rk)!=1])==0 and np.array_equal(self.get_faced_direction_coordinates(*self.game_state["player_coordinates_data"][1:4]),self.get_faced_direction_coordinates(*ed[0][1:4])):
-                ret=self.activate_event_reward_flag(ek,False)
+                ret=self.activate_event_reward_flag(ek,use_script_positions=False)
                 if ret:
                     self.update_overworld_screen()
                     return ret
@@ -1930,6 +1979,14 @@ class GameCore(GameAbstractCore):
             self.last_checkpoint_place[:]=self.first_checkpoint_place if map_id==self.first_checkpoint_place[0] else [map_id,3,3,direction]
         else:
             self.last_checkpoint_place[:]=[map_id,y,x,direction]
+    def add_teleport_data(self,map_id:int)->None:
+        """Allow a map to be a teleport location if stated in the game data."""
+        if map_id in self.game_data["teleport_data"]:
+            self.teleport_data[map_id]=self.game_data["teleport_data"][map_id][0]
+    def allow_all_teleport_data(self)->None:
+        """Enable all teleport locations. Mostly used for debugging."""
+        self.teleport_data.clear()
+        self.teleport_data={k:v[0] for k,v in self.game_data["teleport_data"].items()}
     def force_teleport_to(self,map_id:int,y:int,x:int,direction:int=0,add_step:bool=True)->int:
         """Force the player to new coordinates."""
         coords=np.array([map_id,y,x,direction if direction<4 else self.game_state["player_coordinates_data"][3]],dtype=np.int16)
@@ -1975,15 +2032,17 @@ class GameCore(GameAbstractCore):
     def teleport_to_checkpoint(self)->None:
         """Teleport to the last checkpoint coordinates."""
         self.force_teleport_to(*self.last_checkpoint_place[:3],4)#,0)
-    def set_secondary_action_value(self,map_id:int)->None:
+    def set_secondary_action_value(self,map_id:int)->bool:
         """Assigns a secondary internal action value. Used for some powerups."""
-        self.secondary_action_value=map_id if map_id in self.teleport_data else -1
+        ret=map_id in self.teleport_data
+        self.secondary_action_value=map_id if ret else -1
+        return ret
     def powerup_teleport_to(self,map_id:int,force:bool=False)->None:
         """Legit teleport powerup."""
         if self.check_recursion(1) and (force or self.game_state["player_coordinates_data"][4]==0):
             self.secondary_action_value=-1
             if map_id in self.teleport_data:
-                self.force_teleport_to(map_id,*self.teleport_data[map_id][0][::-1],0,add_step=False)
+                self.force_teleport_to(map_id,*self.teleport_data[map_id][::-1],0,add_step=False)
 ########################
 ### LOAD-SAVE STATES ###
 ########################
@@ -2016,11 +2075,11 @@ class GameCore(GameAbstractCore):
         if teleported or len(used_collected_flags)>0:
             if len(used_collected_flags)>0:
                 self.reset_event_flags()
-            self.activate_event_reward_flag(self.first_event_name,True)
+            self.activate_event_reward_flag(self.first_event_name,use_script_positions=True,trigger_agent=False)
             self.game_state["player_level"]=used_level
             self.game_on_event_custom_load(starting_event,used_collected_flags,used_level)
             for k in used_collected_flags:
-                self.activate_event_reward_flag(k,True)
+                self.activate_event_reward_flag(k,use_script_positions=True,trigger_agent=False)
         self.set_checkpoint_map_position(*checkpoint_map_data[:4])
         if self.using_npcs:
             self.update_npcs_movements_and_interactions(False)
@@ -2038,6 +2097,11 @@ class GameCore(GameAbstractCore):
                         for sn,sv in state[k].items():
                             if len(sn)>0 and hasattr(self.menu,sn):
                                 setattr(self.menu,sn,deepcopy(sv))
+                elif k=="reserved_agent_state":
+                    if self.has_agent() and isinstance(state[k],dict):
+                        for sn,sv in state[k].items():
+                            if len(sn)>0 and hasattr(self.agent,sn):
+                                setattr(self.agent,sn,deepcopy(sv))
                 else:
                     setattr(self,k,deepcopy(state[k]))
         self.clear_events_caches()
@@ -2060,6 +2124,8 @@ class GameCore(GameAbstractCore):
         state={k:deepcopy(getattr(self,k)) for k in self.get_attribute_state_names() if len(k)>0 and hasattr(self,k)}
         if self.true_menu and self.menu is not None:
             state["reserved_menu_state"]={k:deepcopy(getattr(self.menu,k)) for k in self.menu.get_attribute_state_names() if len(k)>0 and hasattr(self.menu,k)}
+        if self.has_agent():
+            state["reserved_agent_state"]={k:deepcopy(getattr(self.agent,k)) for k in self.agent.get_attribute_state_names() if len(k)>0 and hasattr(self.agent,k) and not k in ["env","game_env"]}        
         return state
     def load_state_from_file(self,file_path:str)->dict:
         """Load a state from a pickle dumped file."""
@@ -2076,9 +2142,10 @@ class GameCore(GameAbstractCore):
 ####################
 ### ACTION SPACE ###
 ####################
+    @lru_cache_func(maxsize=1)
     def get_current_max_action_space(self)->int:
         """Returns the max value of the action space depending on powerups."""
-        return self.action_interact_id
+        return self.allowed_actions_count-1
     def roll_random_screen_offsets(self,count:int=1)->np.ndarray:
         """Return a random [y,x] offset from player inside the screen view."""
         return np.hstack([np.random.randint(self.player_screen_bounds[0],self.player_screen_bounds[1]+1,(count,1)),np.random.randint(self.player_screen_bounds[2],self.player_screen_bounds[3]+1,(count,1))])
@@ -2098,6 +2165,52 @@ class GameCore(GameAbstractCore):
     def predict_action(self)->int:
         """Predict an action if there is an agent linked or pick one randomly otherwise."""
         return self.roll_random_actions_without_nop(1)[0] if self.agent is None else self.agent.predict_action()
+    def test_random_valid_movement_to_from_tile(self,target_tile:Union[int,None]=None,save_partial_movement:bool=True)->int:
+        """Check for minimal action required for exiting the current warp."""
+        shuffled_movement_actions=list(range(self.movement_max_actions))
+        np.random.shuffle(shuffled_movement_actions)
+        for action in shuffled_movement_actions:
+            ret=self.get_expected_direction_and_movement(4,action,self.game_state["player_coordinates_data"][3])
+            new_expected_coords=self.game_state["player_coordinates_data"][:3].copy()
+            new_expected_global_coords=self.game_state["player_coordinates_data"][4:7].copy()
+            new_expected_coords[1:3]+=ret[:2]
+#            nb_sum_int16(new_expected_coords[1:3],ret[:2])
+            new_expected_global_coords[1:3]+=ret[:2]
+#            nb_sum_int16(new_expected_global_coords[1:3],ret[:2])
+            map_dims=self.get_cached_map_sizes(self.game_state["player_coordinates_data"][0])
+            if self.cached_is_point_inside_area(*new_expected_coords[1:3],0,0,*map_dims):
+                expected_tile=self.global_map[new_expected_global_coords[0],new_expected_global_coords[1],new_expected_global_coords[2]]
+                if self.is_walkable_tile_id(expected_tile) and (target_tile is None or expected_tile==target_tile):
+                    if save_partial_movement:
+                        self.game_state["player_coordinates_data"][:3]=new_expected_coords[:3]
+#                        nb_assign_int16(self.game_state["player_coordinates_data"][:3],new_expected_coords[:3])
+                        self.game_state["player_coordinates_data"][5:7]=self.get_cached_legacy_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3])
+#                        nb_assign_int16(self.game_state["player_coordinates_data"][5:7],self.get_cached_legacy_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3]))
+                        if self.game_state["player_coordinates_data"][4]==0:
+                            self.game_state["player_coordinates_data"][7:9]=self.game_state["player_coordinates_data"][5:7]
+#                            nb_assign_int16(self.game_state["player_coordinates_data"][7:9],self.game_state["player_coordinates_data"][5:7])
+                        self.game_state["player_coordinates_data"][9:11]=self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3])
+#                        nb_assign_int16(self.game_state["player_coordinates_data"][9:11],self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3]))
+                    return action
+        return self.action_nop_id
+    def get_exit_stepped_warp_actions(self)->list:
+        """Try to fix stepping erroneusly on a warp."""
+        actions=[]
+        if self.get_current_tile()==warp_tile_id:
+            bk_movement=self.game_state["player_coordinates_data"].copy()
+            for tile in [None,warp_tile_id]:
+                action=self.test_random_valid_movement_to_from_tile(tile)
+                if action>=self.movement_max_actions:
+                    break
+                actions.append(action)
+            self.game_state["player_coordinates_data"][:]=bk_movement
+        return actions if len(actions)>0 else [self.action_nop_id]
+    def imitation_policy_simulation(self,obs:Union[dict,np.ndarray],
+        state:Union[dict,np.ndarray,None],dones:np.ndarray
+    )->tuple[np.ndarray,np.ndarray]:
+        """Convenience function."""
+        return (np.array([self.predict_action()]),state)
+
 ##################
 ### DATA NAMES ###
 ##################
@@ -2109,7 +2222,7 @@ class GameCore(GameAbstractCore):
         return []
     def get_reserved_attribute_states_names(self)->list[str]:
         """List of reserved attributes names for child objects preserved in a save state."""
-        return ["reserved_menu_state"]#,"reserved_agent_state"]
+        return ["reserved_menu_state","reserved_agent_state"]
     def get_attribute_state_names(self)->set:
         """List of all attribute names preserved in a save state."""
         return set(["seed","step_count","game_completed","total_reward",
@@ -2139,9 +2252,22 @@ class GameCore(GameAbstractCore):
         new_step=new_total-self.total_reward
         self.total_reward=new_total
         return new_step
+    def env_reward_final(self,action:int=-1)->float:
+        """Total reward of the action at the current step."""
+        return self.update_reward(action)
+    def update_reward_final(self,action:int=-1)->float:
+        """Delta reward of the action at the current step."""
+        self.check_new_event_reward_flags()
+        new_total=self.env_reward_final(action)
+        new_step=new_total-self.total_reward
+        self.total_reward=new_total
+        return new_step
+    def steps_or_game_completed(self)->bool:
+        """Return True if the game steps are above max, or the game is completed."""
+        return (self.max_steps>0 and self.step_count>=self.max_steps) or (self.game_completed and not self.infinite_game)
     def is_done(self)->bool:
         """Return True to stop the game execution."""
-        return (self.max_steps>0 and self.step_count>=self.max_steps) or (self.game_completed and not self.infinite_game) or self.env_is_done()
+        return self.steps_or_game_completed() or self.env_is_done()
     def close(self)->None:
         """Cleanup code for freeing environment resources."""
         return
@@ -2184,9 +2310,14 @@ class GameCore(GameAbstractCore):
         self.game_state["pseudo_seed"]=np.random.randint(0,0x100,dtype=np.int16)
         self.game_state["player_coordinates_data"][:]=np.asarray([map_id]+local_coords.tolist()+[self.start_map_position[3]]+[self.get_cached_global_map_channel(map_id)]+self.get_cached_legacy_global_map_coords(map_id,local_coords).tolist()+self.get_nearest_channel_warp_from_player(0,0,6,5)[1].tolist()+self.get_cached_global_map_coords(map_id,local_coords).tolist(),dtype=np.int16)
         self.game_state["last_suggested_coordinates"][:]=0
+        self.game_state["pending_warp_state"]=0
         self.game_state["previous_map_id"]=map_id
         self.reset_forced_directional_movements()
+        if "warps" in self.game_data and self.game_data["warps"].shape[2]>=10:
+            self.game_data["warps"][:,:,5:10]=self.game_data["warps"][:,:,:5]
         self.teleport_data.clear()
+        if self.unlock_teleport_locations:
+            self.allow_all_teleport_data()
         if self.has_menu():
             self.menu.reset(seed)
         self.event_rewards_powerups=deepcopy(self.game_data["powerups"])
@@ -2204,7 +2335,10 @@ class GameCore(GameAbstractCore):
         for k,v in self.event_rewards_data.items():
             self.event_rewards_data_by_map[v[0][0]]={}
         for k,v in self.event_rewards_data.items():
-            self.event_rewards_data_by_map[v[0][0]][k]=[np.array(v[0],dtype=np.int16)]+v[1:]+[[nwd for c in range(2) for nwd in self.get_nearest_channel_warp_from_player(c,*v[0][:3])[:2]]]
+            self.event_rewards_data_by_map[v[0][0]][k]=[np.array(v[0],dtype=np.int16)]+v[1:]+[
+            self.get_legacy_global_map_coords(*v[0][:3])]+[
+                [nwd for c in range(2) for nwd in self.get_nearest_channel_warp_from_player(c,*v[0][:3])[:2]]
+            ]
         self.scripts_data_by_map.clear()
         for k,v in self.scripts_data.items():
             self.scripts_data_by_map[v[0][0]]={}
@@ -2223,7 +2357,6 @@ class GameCore(GameAbstractCore):
         for _,v in self.stacked_state.items():
             v[0,:]=0
         self.game_on_reset()
-
         self.reset_event_flags()
         ### self.load_custom_save_from_events WAS INITIALLY HERE, CAUSING A BUG WITH NPC NOT BEING INITIALLY VISIBLE, BUT INTERACTABLE
         self.global_map[:]=no_map_tile_id
@@ -2294,7 +2427,8 @@ class GameCore(GameAbstractCore):
                 ret=self.run_overworld_action(action)
             else:
                 ret=self.run_text_action(action)
-                self.update_text_screen()
+                if self.game_state["text_type"]>0:
+                    self.update_text_screen()
         if self.log_screen:
             self.add_gif_frame()
         if ret and self.game_state["battle_type"]==0 and active_script_tile_id==self.global_map[self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]:
@@ -2346,27 +2480,47 @@ class GameCore(GameAbstractCore):
         """Process any overworld-related action."""
         (forced_direction,skip_movement,powerup_started,should_check_script,warped,screen_update_fallback,npc_script_name,npc_script_args)=(
             len(self.forced_directional_movements)>0,False,False,True,False,True,None,[])
-        if forced_direction:
-            action=self.forced_directional_movements.pop()
-            if action>=4:
-                forced_direction=False
-        if not forced_direction:
-            if action<0:
-                action=self.action_nop_id
-            exp_dir_mov=self.get_expected_direction_and_movement(self.movement_max_actions,action,
-                self.game_state["player_coordinates_data"][3])
-            if action>=self.movement_max_actions:
-                if self.true_menu and action==self.action_menu_id and self.game_state["menu_type"]==0:
-                    return self.run_menu_action(self.action_menu_id)
-                (skip_movement,powerup_started)=self.handle_non_directional_actions(action)
+        if self.two_step_warp and self.game_state["pending_warp_state"]>0:
+            if self.game_state["pending_warp_state"]==1:
+                self.game_state["player_coordinates_data"][:4]=self.game_state["pending_warp_data"]
+                self.game_state["pending_warp_data"][:]=0
+                self.game_state["pending_warp_state"]=2
+                self.game_state["player_coordinates_data"][4]=self.get_cached_global_map_channel(self.game_state["player_coordinates_data"][0])
+                self.game_state["player_coordinates_data"][5:7]=self.get_cached_legacy_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3])
+#                nb_assign_int16(self.game_state["player_coordinates_data"][5:7],self.get_cached_legacy_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3]))
+                if self.game_state["player_coordinates_data"][4]==0:
+                    self.game_state["player_coordinates_data"][7:9]=self.game_state["player_coordinates_data"][5:7]
+#                    nb_assign_int16(self.game_state["player_coordinates_data"][7:9],self.game_state["player_coordinates_data"][5:7])
+                self.game_state["player_coordinates_data"][9:11]=self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3])
+#                nb_assign_int16(self.game_state["player_coordinates_data"][9:11],self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3]))
+                self.history_tracking["steps_on_map"][self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]+=1
+                skip_movement=True
             else:
-                self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
-        else:
-            exp_dir_mov=self.get_expected_direction_and_movement(4,
-                self.get_action_from_direction_offsets_4way(*self.get_direction_offset(action
-                )),self.game_state["player_coordinates_data"][3])
-            self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
+                self.game_state["pending_warp_state"]=0
+            forced_direction=False
             should_check_script=False
+        if not skip_movement:
+            if forced_direction:
+                action=self.forced_directional_movements.pop()
+                if action>=4:
+                    forced_direction=False
+            if not forced_direction:
+                if action<0:
+                    action=self.action_nop_id
+                exp_dir_mov=self.get_expected_direction_and_movement(self.movement_max_actions,action,
+                    self.game_state["player_coordinates_data"][3])
+                if action>=self.movement_max_actions:
+                    if self.true_menu and action==self.action_menu_id and self.game_state["menu_type"]==0:
+                        return self.run_menu_action(self.action_menu_id)
+                    (skip_movement,powerup_started)=self.handle_non_directional_actions(action)
+                else:
+                    self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
+            else:
+                exp_dir_mov=self.get_expected_direction_and_movement(4,
+                    self.get_action_from_direction(action),
+                    self.game_state["player_coordinates_data"][3])
+                self.game_state["player_coordinates_data"][3]=exp_dir_mov[2]
+                should_check_script=False
         if not skip_movement:
             new_expected_coords=self.game_state["player_coordinates_data"][:3].copy()
             new_expected_global_coords=self.game_state["player_coordinates_data"][4:7].copy()
@@ -2395,7 +2549,7 @@ class GameCore(GameAbstractCore):
                 if expected_tile==warp_tile_id and self.global_map[self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]!=warp_tile_id:
                     for w in self.get_cached_map_warps(self.game_state["player_coordinates_data"][0]):
                         if np.array_equal(new_expected_coords[1:3],w[:2]):
-                            movements.append(w[-3:])
+                            movements.append(w[2:5])
                             break
                 if self.game_handle_random_encounter_spawn(movements[-1][0],expected_tile)<0:
                     warped=True
@@ -2403,7 +2557,7 @@ class GameCore(GameAbstractCore):
                     self.game_post_movement_powerup_status(expected_tile)
                     screen_update_fallback=False
                     warped=global_warped or len(movements)>1
-                    if warped:
+                    if warped and (not self.two_step_warp or self.game_state["pending_warp_state"]==0):
                         self.core_hook_before_warp(global_warped,movements)
                     for m in movements:
                         self.game_state["player_coordinates_data"][:3]=m[:3]
@@ -2417,13 +2571,19 @@ class GameCore(GameAbstractCore):
                         self.game_state["player_coordinates_data"][9:11]=self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3])
 #                        nb_assign_int16(self.game_state["player_coordinates_data"][9:11],self.get_cached_global_map_coords(self.game_state["player_coordinates_data"][0],self.game_state["player_coordinates_data"][1:3]))
                         self.history_tracking["steps_on_map"][self.game_state["player_coordinates_data"][4],self.game_state["player_coordinates_data"][5],self.game_state["player_coordinates_data"][6]]+=1
+                        if self.two_step_warp:
+                            break
+                    if self.two_step_warp and len(movements)>1:
+                        self.game_state["pending_warp_data"][:3]=movements[-1][:3]
+                        self.game_state["pending_warp_data"][3]=self.game_state["player_coordinates_data"][3]
+                        self.game_state["pending_warp_state"]=1
                     self.update_overworld_screen()
                     self.hook_after_movement()
         if not warped:
             if self.using_npcs:
                 (npc_script_name,npc_script_args)=self.update_npcs_movements_and_interactions()
                 self.npcs_map_tiles_update(self.game_state["player_coordinates_data"][0],warped)
-        else:
+        elif not self.two_step_warp or self.game_state["pending_warp_state"]==2:
             self.core_hook_after_warp()
         if screen_update_fallback:
             self.update_overworld_screen()
@@ -2472,8 +2632,11 @@ class GameCore(GameAbstractCore):
             if self.step_count%65536==0:
                 self.clear_all_lru_cache()
         self.step_recursion_depth-=1
-        if rec_check and (len(self.rewind_states_deque)==0 or (self.rewind_steps>0 and self.step_count%self.rewind_steps==0)):
-            self.rewind_states_deque.append(self.save_state())
+        if rec_check:
+            if (len(self.rewind_states_deque)==0 or (self.rewind_steps>0 and self.step_count%self.rewind_steps==0)):
+                self.rewind_states_deque.append(self.save_state())
+            if self.has_agent():
+                self.agent.hook_after_step()
         return self.step_recursion_depth
     def step_game_predict(self)->int:
         """Step the game following the agent prediction."""
@@ -2515,10 +2678,10 @@ if __name__=="__main__":
     from cli import main_cli
     test_game_name=1
     test_mode="play"
-    test_action_complexity=4
+    test_action_complexity=2
     test_screen_observation_type=4
-    test_screen_mult=2
-    test_starting_event="medal1"
+    test_screen_mult=1
+    test_starting_event=""
     test_stdout=True
     main_cli([test_game_name,"--mode",test_mode,
         "--action_complexity",test_action_complexity,

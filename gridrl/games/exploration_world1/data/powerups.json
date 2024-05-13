@@ -2,12 +2,12 @@
 "comment|powerup_name":["powerup_event_name","required_event_names"],
 "comment|info":["DON'T EDIT THIS FILE, MOST SCRIPTING RECOGNITION IS HARDCODED"],
 
-"can_debush":	        ["medal1","powerup_debush"],
-"can_swim":	            ["medal2","powerup_swim"],
-"can_teleport":	        ["medal3","powerup_teleport"],
-"can_cross_whirlpool":	["medal4","powerup_cross_whirlpool"],
-"can_cross_waterfall":	["medal5","powerup_cross_waterfall"],
-"can_break_rock":	    ["medal6","powerup_break_rock"],
-"can_mountain_climb":	["medal7","powerup_mountain_climb"],
+"can_debush":           ["medal1","powerup_debush"],
+"can_swim":             ["medal2","powerup_swim"],
+"can_teleport":         ["medal3","powerup_teleport"],
+"can_cross_whirlpool":  ["medal4","powerup_cross_whirlpool"],
+"can_cross_waterfall":  ["medal5","powerup_cross_waterfall"],
+"can_break_rock":       ["medal6","powerup_break_rock"],
+"can_mountain_climb":   ["medal7","powerup_mountain_climb"],
 "can_break_frozen_rock":["medal8","powerup_break_frozen_rock"]
 }

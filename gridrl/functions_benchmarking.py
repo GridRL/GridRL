@@ -19,6 +19,9 @@ if __package__ is None or len(__package__)==0:
 else:
     from gridrl.functions_data import script_dir
 
+__all__=["get_benchmark_env_base_configs","benchmark_envs","benchmark_agents",
+    "benchmark_env_multiconfig","profile_env"]
+
 def get_benchmark_env_base_configs()->dict:
     """Get default settings for the benchmarked environment."""
     return {"movement_max_actions":4,"max_steps":-1,"action_nop":False,

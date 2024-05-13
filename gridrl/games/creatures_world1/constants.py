@@ -6,12 +6,19 @@ from collections import OrderedDict
 import sys
 sys.dont_write_bytecode=True
 
+__all__=["battle_moves_list","field_moves_list","moves_list","moves_ids_dict",
+    "creatures_data_dict","creatures_ids_dict","creatures_names","creatures_bst",
+    "creatures_evolution_data","generic_items_list","generic_learn_move_items_dict",
+    "key_learn_move_items_dict","generic_learn_move_items_list","key_learn_move_items_list",
+    "learn_move_items_dict","key_generic_items_list","consumable_items_list",
+    "learn_move_items_list","key_items_list","items_list","items_ids_dict"]
+
 battle_moves_list=["move","struggle","move_1","move_2","move_3","move_4"]+[f"atk_{i:02d}" for i in range(1,9)]
 field_moves_list=["torch","debush","swim","teleport","boulders"]
 moves_list=battle_moves_list+field_moves_list
 moves_ids_dict={k:i for i,k in enumerate(moves_list)}
 
-creatures_data_list=OrderedDict([
+creatures_data_dict=OrderedDict([
     ("creature",    [0,300,[0xFF,0,""]]),
     ("starter_1",   [0,318,[16,1,"starter_2"]]),
     ("starter_2",   [0,405,[32,1,"starter_3"]]),
@@ -19,18 +26,19 @@ creatures_data_list=OrderedDict([
     ("bird_1",      [0,300,[0xFF,0,"bird_2"]]),
     ("bird_2",      [0,370,[32,1,"bird_3"]]),
     ("bird_3",      [0,460,[0xFF,0,""]]),
+    ("sleeper_N",   [0,570,[0xFF,0,""]]),
     ("birb_E",      [0,600,[0xFF,0,""]]),
-    ("birb_F",      [0,600,[0xFF,0,""]]),
     ("birb_I",      [0,600,[0xFF,0,""]]),
+    ("birb_F",      [0,600,[0xFF,0,""]]),
     ("monster_P",   [0,700,[0xFF,0,""]]),
 ])
 
-for i,(k,v) in enumerate(creatures_data_list.items()):
-    creatures_data_list[k][0]=i
-creatures_ids_dict={k:i for i,(k,_) in enumerate(creatures_data_list.items())}
-creatures_names=[k for k,_ in creatures_data_list.items()]
-creatures_bst=[v[1] for _,v in creatures_data_list.items()]
-creatures_evolution_data=[[v[2][0],v[2][1],0 if len(v[2])<2 or len(v[2][2])<1 else creatures_ids_dict[v[2][2]]] for _,v in creatures_data_list.items()]
+for i,(k,v) in enumerate(creatures_data_dict.items()):
+    creatures_data_dict[k][0]=i
+creatures_ids_dict={k:i for i,(k,_) in enumerate(creatures_data_dict.items())}
+creatures_names=[k for k,_ in creatures_data_dict.items()]
+creatures_bst=[v[1] for _,v in creatures_data_dict.items()]
+creatures_evolution_data=[[v[2][0],v[2][1],0 if len(v[2])<2 or len(v[2][2])<1 else creatures_ids_dict[v[2][2]]] for _,v in creatures_data_dict.items()]
 
 generic_items_list=["item",
     "hp_cure_1","hp_cure_2","hp_cure_3","hp_cure_4",

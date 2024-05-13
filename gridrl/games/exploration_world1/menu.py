@@ -26,6 +26,8 @@ except ModuleNotFoundError:
 
 sys.dont_write_bytecode=True
 
+__all__=["ExplorationWorld1Menu"]
+
 if True:#not cython.compiled:
     M_main_menu=IntEnum("M_main_menu",["m_overworld","m_unknown","m_text","m_menu","m_powerup","m_bag","m_player"],start=0)
     M_powerup=IntEnum("M_powerup",["powerup","menu_selection","cant_powerup"],start=0)

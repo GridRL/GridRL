@@ -8,6 +8,8 @@ import argparse
 import numpy as np
 sys.dont_write_bytecode=True
 
+#__all__=[]
+
 if __package__ is None or len(__package__)==0:
     from games_list import GAMES_LIST
     from game_module_selector import GameModuleSelector,get_game_default_env_class

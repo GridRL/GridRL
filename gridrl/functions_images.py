@@ -13,6 +13,10 @@ import matplotlib.pyplot as plt
 #import matplotlib.font_manager as mfontm
 sys.dont_write_bytecode=True
 
+__all__=["fix_contiguous_array","tile_split","tile_rebuild","fill_pad_image",
+    "rgb_to_grayscale","map_matrix_to_image","generate_characters_tiles",
+    "generate_gif_from_numpy","show_image","compute_minimap"]
+
 def fix_contiguous_array(img:np.ndarray)->np.ndarray:
     """Fixes the ndarray contiguity."""
     return img if img.flags["C_CONTIGUOUS"] else np.ascontiguousarray(img)
@@ -141,3 +145,23 @@ def show_image(img:np.ndarray,title:str="Img")->None:
     if len(title)>0:
         ax.set_title(title.replace("\t"," "))
     plt.show()
+
+def compute_minimap(full_map:np.ndarray,tiles_importance:np.ndarray,downscale:int=3)->np.ndarray:
+    """Compress a 3d map in a custom representation 4d representation."""
+    if len(full_map.shape)>3:
+        return full_map
+    used_downscale=max(2,int(downscale))
+#    padding=np.mod(used_downscale-np.mod(full_map.shape[-2:],used_downscale),used_downscale)
+#    if np.max(padding)>0:
+#    ### TO-ADD: PAD IMAGE IF NOT DIVISIBLE
+#        print("PAD!",padding)
+    tile_map_data=tile_split(full_map.reshape(-1,*full_map.shape[2:]),used_downscale)
+    tile_map_data=tile_map_data.reshape(full_map.shape[0],-1,*tile_map_data.shape[1:])
+    tile_shape=list(tile_map_data.shape)
+    tile_map_data=fix_contiguous_array(tile_map_data.reshape(*tile_map_data.shape[:3],-1))
+    tile_map_importance=np.take(tiles_importance,tile_map_data,mode="clip")
+    amax=np.expand_dims(np.argmax(tile_map_importance,axis=3),axis=-1)
+    minimap=np.concatenate(np.unravel_index(amax,tile_shape),axis=-1).astype(np.uint8)[...,-3:]
+    minimap=fix_contiguous_array(minimap)
+    minimap[...,0]=np.take_along_axis(tile_map_data,amax,axis=-1)[...,0]
+    return minimap
