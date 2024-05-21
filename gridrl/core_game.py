@@ -2676,8 +2676,8 @@ class GameCore(GameAbstractCore):
 
 if __name__=="__main__":
     from cli import main_cli
-    test_game_name=1
-    test_mode="play"
+    test_game_name=0
+    test_mode="cythontest"
     test_action_complexity=2
     test_screen_observation_type=4
     test_screen_mult=1

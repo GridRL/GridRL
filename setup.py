@@ -7,20 +7,24 @@ import platform
 import os
 import multiprocessing
 from multiprocessing import cpu_count
+from distutils.dir_util import remove_tree
 import numpy as np
 from setuptools import Extension, setup, find_packages
 
-try:
-    raise ModuleNotFoundError # CURRENTLY NOTHING TO CYTHONIZE, RAISING EXCEPTION
-    if platform.python_implementation() != "CPython":
-        raise ModuleNotFoundError
-    from Cython.Build import cythonize
-    from Cython.Distutils import build_ext as _build_ext
+use_cython = False # not "--nocython" in sys.argv
+cython_dirs_blacklist = [".egg-info", "extras", "data", "examples","creatures"]
+cython_files_blacklist = ["setup.py"]
+cython_files_whitelist = ["configs_speedup_dependencies.p", "core_game.p", "menu_base.p",
+    "_abstract_game.py","game.p","menu.p"]
 
-    use_cython = True
-except (ModuleNotFoundError, ImportError):
-    use_cython = False
-
+if use_cython:
+    try:
+        if len(cython_files_whitelist)==0 or platform.python_implementation() != "CPython":
+            raise ModuleNotFoundError
+        from Cython.Build import cythonize
+        from Cython.Distutils import build_ext as _build_ext
+    except (ModuleNotFoundError, ImportError):
+        use_cython = False
 try:
     script_dir = f"{os.path.dirname(os.path.realpath(__file__))}{os.sep}"
 except NameError:
@@ -40,23 +44,28 @@ version = "0.0.1"
 with open(f"{script_dir}gridrl{os.sep}__version__.py", mode="r", encoding="utf8") as f:
     version = f.read().rsplit(maxsplit=1)[-1].strip("'")
 
-if use_cython:
+build_dir=f"{script_dir}build"
+if os.path.isdir(build_dir):
+    remove_tree(f"{script_dir}build")
 
+if use_cython:
     def prep_pxd_py_files():
         ignore_py_files = []
         for root, dirs, files in os.walk("."):
-            if len([1 for m in ["data", "extras", "examples", ".egg-info"] if m in root]) > 0:
+            if len([1 for m in cython_dirs_blacklist if m in root]) > 0:
                 continue
             for f in files:
-                if len([1 for m in ["setup.py", "core_game.p"] in f]) > 0:
+                if len([1 for m in cython_files_whitelist if m in f]) == 0:
+                    continue
+                if len([1 for m in cython_files_blacklist if m in f]) > 0:
                     continue
                 if os.path.splitext(f)[1] in [".py", ".pyx"] and f not in ignore_py_files:
                     yield os.path.join(root, f)
-                """if os.path.splitext(f)[1] == ".pxd":
+                if os.path.splitext(f)[1] == ".pxd":
                     py_file = f"{os.path.join(root, os.path.splitext(f)[0])}.py"
                     if os.path.isfile(py_file):
                         if os.path.getmtime(os.path.join(root, f)) > os.path.getmtime(py_file):
-                            os.utime(py_file)"""
+                            os.utime(py_file)
 
     class build_ext(_build_ext):
         def initialize_options(self):
@@ -77,10 +86,10 @@ if use_cython:
             cythonize_files = map(
                 lambda src: Extension(
                     src.split(".")[0].replace(os.sep, "."),
-                    [src],
+                    sources=[src],
                     extra_compile_args=cflags,
                     extra_link_args=["-s", "-w"],
-                    include_dirs=[np.get_include()],
+                    include_dirs=[".",np.get_include()],
                 ),
                 list(py_pxd_files),
             )
@@ -91,7 +100,7 @@ if use_cython:
                 gdb_debug=False,
                 language_level=3,
                 compiler_directives={
-                    ### NOT IS FOR TESTING
+                ### <NOT> IS FOR TESTING MINIMAL OPTIMIZATION
                     "boundscheck": not False,
                     "cdivision": True,
                     "cdivision_warnings": False,
@@ -119,6 +128,7 @@ setup(
     long_description_content_type="text/markdown",
     version=version,
     packages=find_packages(),
+    include_dirs=".",
     include_package_data=False,
     install_requires=required_packages,
     python_requires=">=3.9",

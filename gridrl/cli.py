@@ -27,7 +27,7 @@ def argparse_cli_game()->argparse.Namespace:
     """Cli parse arguments."""
     parser=argparse.ArgumentParser()
     parser.add_argument("game",type=str,help="Name of the GridRL game.")
-    parser.add_argument("--mode",type=str,help="Name of the mode to run.",choices=["map","info","play","sandbox","gif","stream","benchmark","menu_benchmark","profile","examples","copy","test"],default="test")
+    parser.add_argument("--mode",type=str,help="Name of the mode to run.",choices=["map","info","play","sandbox","gif","stream","cythontest","benchmark","menu_benchmark","profile","examples","copy","test"],default="test")
     parser.add_argument("--action_complexity",type=int,help="Complexity of the game and actions performed.",choices=[-1,0,1,2,3,4],default=-1)
     parser.add_argument("--screen_observation_type",type=int,help="Type of observation space returned.",choices=[-1,0,1,2,3,4],default=-1)
     parser.add_argument("--starting_event",type=str,help="Starts from a custom event flag.",default="")
@@ -107,6 +107,22 @@ def cli_copy_examples()->bool:
     print(f"\t{'Copied!' if ret else 'Failed.'}")
     return ret
 
+def cli_run_cython_test(game_name,running_verbose:bool=True)->None:
+    """Development cython test routine."""
+    print("Running cython test...")
+    print_configs_speedup_settings()
+    running_verbose=True
+    configs_list=[{"screen_observation_type":0,"action_complexity":0}]
+    env_class=get_game_default_env_class(game_name)
+    steps=int(1e5)
+    np.random.seed(7)
+    envs=[env_class(get_benchmark_env_base_configs())]
+    benchmark_envs(envs,steps=50000,warmup=0,seed=7,show_screen=False,verbose=True)
+    print(envs[0].get_debug_text())
+    #benchmark_env_multiconfig(env_class,configs_list,steps=steps,warmup=False,seed=7,running_verbose=running_verbose,verbose=True)
+    print(np.random.get_state()[1][:4])
+    profile_env(env_class(configs_list[0]),steps=50000)
+
 def cli_run_benchmark(game_name,running_verbose:bool=True)->None:
     """Main benchmark routine."""
     print("Running benchmark with various environment configurations...")
@@ -162,6 +178,8 @@ def run_mode(game_name:str,mode_name:str,config:Union[dict,None]=None,redirect_s
     elif mode_name in ["p","play","sa","sandbox","s","stream","g","gif"]:
         cli_run_game(game_name,config=config,gif=mode_name[0]=="g",streaming=(mode_name[:2]+"t")[:2]=="st",
             validate=True,redirect_stdout=redirect_stdout)
+    elif mode_name in ["c","ct","cythontest"]:
+        cli_run_cython_test(game_name)
     elif mode_name in ["b","bench","benchmark"]:
         cli_run_benchmark(game_name)
     elif mode_name in ["mb","menu_benchmark"]:
